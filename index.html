@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Portal Chess (MVP)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>Portal Chess (MVP)</h1>
+
+  <div id="controls" class="controls" aria-hidden="false">
+    <label>
+      Mode:
+      <select id="modeSelect">
+        <option value="hotseat">Hotseat (2 players)</option>
+        <option value="vs-ai">Play vs AI</option>
+        <option value="analyze">Analyze (play both, ask engine)</option>
+      </select>
+    </label>
+
+    <label id="aiColorLabel">
+      AI Color:
+      <select id="aiColorSelect">
+        <option value="b">Black (AI)</option>
+        <option value="w">White (AI)</option>
+      </select>
+    </label>
+
+    <label id="aiDepthLabel">
+      AI Depth:
+      <input id="aiDepthInput" type="number" min="1" max="4" value="3" style="width:54px" />
+    </label>
+
+    <button id="suggestBtn">AI Suggest</button>
+    <button id="applySuggestionBtn">Apply Suggestion</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="board" class="board" aria-label="Chessboard"></div>
+
+  <script type="module" src="ui.js"></script>
+</body>
+</html>
