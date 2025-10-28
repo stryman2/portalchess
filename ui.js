@@ -27,6 +27,58 @@ const RANKS = "12345678".split("");
 // Path to local SVG piece set. Place cburnett SVGs under this folder with names like 'wP.svg', 'bK.svg', etc.
 const PIECE_IMG_PATH = "pieces/cburnett";
 
+// Inject minimal CSS for portal selection overlay/highlights (kept local so
+// edits don't require changes to styles.css).
+(function injectPortalStyles(){
+  const css = `
+  .portal-active .square { opacity: 0.35; transition: opacity .18s ease; }
+  .portal-active .square.portal-selectable { opacity: 1 !important; pointer-events: auto; box-shadow: 0 0 18px rgba(80,180,255,0.9); border-radius:6px; animation: portal-pulse 1.2s infinite; }
+  @keyframes portal-pulse { 0% { box-shadow: 0 0 6px rgba(80,180,255,0.6); } 50% { box-shadow: 0 0 20px rgba(80,180,255,0.95); } 100% { box-shadow: 0 0 6px rgba(80,180,255,0.6); } }
+  `;
+  const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+})();
+
+// Portal selection runtime state (null when inactive)
+let portalSelection = null;
+
+function enablePortalSelection(outcomes, baseMoves) {
+  // Only enable when outcomes are portal outcomes and the originating base move
+  // wasn't a capture. Guarded by callers, but double-check here.
+  if (!outcomes || outcomes.length === 0) return false;
+  if (baseMoves && baseMoves.some(m => m.kind === 'capture')) return false;
+  if (!outcomes.every(o => o.viaPortal)) return false;
+
+  // Unique destination squares to present as choices
+  const dests = [...new Set(outcomes.map(o => (o.toFinal || o.to || '').toUpperCase()))];
+  const allowed = new Set(dests);
+
+  // Mark board as portal-active
+  document.body.classList.add('has-portal-selection');
+  boardEl.classList.add('portal-active');
+
+  // Add portal-selectable class to allowed squares, dim others handled by CSS
+  const sqEls = boardEl.querySelectorAll('.square');
+  sqEls.forEach(el => {
+    const s = el.dataset.sq;
+    if (allowed.has(s)) {
+      el.classList.add('portal-selectable');
+    } else {
+      el.classList.remove('portal-selectable');
+    }
+  });
+
+  portalSelection = { allowed, outcomes, cleanup: disablePortalSelection };
+  return true;
+}
+
+function disablePortalSelection() {
+  portalSelection = null;
+  boardEl.classList.remove('portal-active');
+  document.body.classList.remove('has-portal-selection');
+  const sqEls = boardEl.querySelectorAll('.square');
+  sqEls.forEach(el => el.classList.remove('portal-selectable'));
+}
+
 let state = initialState();
 let selectedSq = null;
 let legalTargets = new Set();
@@ -34,6 +86,7 @@ let suggestion = null; // suggested resolved move (not applied)
 let mode = modeSelect.value; // 'hotseat' | 'vs-ai' | 'analyze'
 let aiColor = aiColorSelect.value; // 'w'|'b'
 let aiDepth = parseInt(aiDepthInput.value, 10) || 3;
+let __dev_safety_wrapper_installed = true; // marker
 
 function isLight(fileIdx, rankIdx) { return (fileIdx + rankIdx) % 2 === 1; }
 function sq(fileIdx, rankIdx) { return `${FILES[fileIdx]}${RANKS[rankIdx]}`; }
@@ -54,6 +107,8 @@ function render() {
       const su = s.toUpperCase();
       const div = document.createElement("div");
       div.className = `square ${isLight(f,r) ? "light" : "dark"}`;
+      // expose square id for portal-selection wiring
+      div.dataset.sq = su;
 
       // compute index for board access early
       const idx = FILES.indexOf(su[0]) + 8 * RANKS.indexOf(su[1]);
@@ -140,33 +195,41 @@ function render() {
 
       // Draw piece
       if (piece) {
-        // Use an <img> pointing at the cburnett SVG set. If the image fails to load (missing files),
-        // fall back to the text glyph so the UI remains functional.
-        const img = document.createElement('img');
-        img.className = `piece piece-${piece.color}`;
-        // Example filename: pieces/cburnett/wP.svg
-        const fileName = `${piece.color}${piece.type}.svg`;
-        img.src = `${PIECE_IMG_PATH}/${fileName}`;
-        img.alt = `${piece.color}${piece.type}`;
-        // Make the image fill the square nicely
-        img.style.width = '100%';
-        img.style.height = '100%';
-        img.style.display = 'block';
-        img.style.pointerEvents = 'none';
-
-        // Fallback: if SVG not available, replace image with glyph span
-        img.addEventListener('error', () => {
+        // If the browser is offline (or dev server unreachable), avoid setting
+        // img.src which triggers network requests that will fail and spam the
+        // console. Instead render the glyph fallback directly. When online we
+        // try the nicer SVG set and fall back to glyph on error.
+        if (!navigator.onLine) {
           const span = document.createElement('span');
           span.className = `piece piece-${piece.color}`;
           span.textContent = pieceToGlyph(piece);
-          // Preserve the coords/overlay stacking by inserting before coords element if present
-          const coordsEl = div.querySelector('.coords');
-          if (coordsEl) div.insertBefore(span, coordsEl);
-          else div.appendChild(span);
-          img.remove();
-        });
+          div.appendChild(span);
+        } else {
+          const img = document.createElement('img');
+          img.className = `piece piece-${piece.color}`;
+          // Example filename: pieces/cburnett/wP.svg
+          const fileName = `${piece.color}${piece.type}.svg`;
+          img.src = `${PIECE_IMG_PATH}/${fileName}`;
+          img.alt = `${piece.color}${piece.type}`;
+          // Make the image fill the square nicely
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.display = 'block';
+          img.style.pointerEvents = 'none';
 
-        div.appendChild(img);
+          // Fallback: if SVG not available, replace image with glyph span
+          img.addEventListener('error', () => {
+            const span = document.createElement('span');
+            span.className = `piece piece-${piece.color}`;
+            span.textContent = pieceToGlyph(piece);
+            const coordsEl = div.querySelector('.coords');
+            if (coordsEl) div.insertBefore(span, coordsEl);
+            else div.appendChild(span);
+            img.remove();
+          });
+
+          div.appendChild(img);
+        }
       }
 
       const coords = document.createElement("div");
@@ -181,99 +244,134 @@ function render() {
   statusEl.textContent = `Mode: ${mode} | Turn: ${state.turn === 'w' ? 'White' : 'Black'} | Move: ${state.moveNumber}`;
 }
 
-function onSquareClick(s) {
-  // If vs-AI and it's AI's turn, ignore clicks
-  if (mode === "vs-ai" && state.turn === aiColor) return;
+// Helper: present an in-page chooser for outcomes. Calls cb(chosen) where
+// chosen is the resolved outcome (with promo/meta.promo attached) or null
+// when canceled. The chooser groups outcomes by destination/via to avoid
+// duplicate entries and shows inline promotion buttons (Q,R,B,N) when a
+// group contains promotion outcomes.
+function showOutcomeChooser(outcomes, cb) {
+  // build groups by destination + portal choice + swapped flag
+  const groups = {};
+  outcomes.forEach(o => {
+    const dest = (o.toFinal || o.to || '').toUpperCase();
+    const choice = o.viaPortal?.choice || '';
+    const swapped = o.viaPortal?.swapped ? '1' : '0';
+    const key = `${dest}|${choice}|${swapped}`;
+    groups[key] = groups[key] || [];
+    groups[key].push(o);
+  });
 
-  const idx = FILES.indexOf(s[0]) + 8 * RANKS.indexOf(s[1]);
-  const piece = state.board[idx];
+  // create overlay
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.left = '0'; overlay.style.top = '0';
+  overlay.style.width = '100%'; overlay.style.height = '100%';
+  overlay.style.background = 'rgba(0,0,0,0.45)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.zIndex = '9999';
 
-  // In Analyze mode or Hotseat: allow selecting pieces for the side to move
-  if (!selectedSq) {
-    if (!piece || piece.color !== state.turn) return;
-    selectedSq = s;
-    const baseMoves = generatePseudoLegalMoves(state, selectedSq);
-    // Filter via check legality for UI highlights
-    let targetSet = new Set();
-    for (const bm of baseMoves) {
-      const outcomes = expandWithPortalOutcomes(state, bm);
-      const legal = filterLegalByCheck(state, outcomes);
-      for (const o of legal) targetSet.add((o.toFinal || o.to));
+  const box = document.createElement('div');
+  box.style.background = '#fff';
+  box.style.borderRadius = '10px';
+  box.style.padding = '12px';
+  box.style.minWidth = '260px';
+  box.style.maxWidth = '90%';
+  box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.25)';
+  box.style.fontFamily = 'sans-serif';
+
+  const title = document.createElement('div');
+  title.textContent = 'Choose outcome';
+  title.style.fontWeight = '600';
+  title.style.marginBottom = '8px';
+  box.appendChild(title);
+
+  Object.keys(groups).forEach(key => {
+    const arr = groups[key];
+    const rep = arr[0];
+    const dest = (rep.toFinal || rep.to || '').toUpperCase();
+    const via = rep.viaPortal ? ` via ${rep.viaPortal.choice || 'PORTAL'}${rep.viaPortal.swapped ? ' (SWAP)' : ''}` : '';
+
+    const row = document.createElement('div');
+    row.style.marginBottom = '8px';
+    const label = document.createElement('div');
+    label.textContent = `${dest}${via}`;
+    label.style.marginBottom = '6px';
+    row.appendChild(label);
+
+    // If any in group are promotions, show the 4 vertical promo buttons
+    const isPromoGroup = arr.some(o => o.kind === 'promotion' || (o.meta && o.meta.promo));
+    if (isPromoGroup) {
+      const promos = ['Q','R','B','N'];
+      const btnContainer = document.createElement('div');
+      btnContainer.style.display = 'flex';
+      btnContainer.style.flexDirection = 'column';
+      btnContainer.style.gap = '6px';
+      promos.forEach(pt => {
+        const b = document.createElement('button');
+        b.textContent = pt;
+        b.style.padding = '8px 12px';
+        b.style.cursor = 'pointer';
+        b.style.border = '1px solid #666';
+        b.style.borderRadius = '6px';
+        b.style.background = '#f5f5f5';
+        b.addEventListener('click', () => {
+          // pick representative outcome and attach the selected promo
+          const chosen = { ...rep };
+          chosen.kind = 'promotion';
+          chosen.promo = pt;
+          chosen.meta = { ...(chosen.meta || {}), promo: pt };
+          cleanup(); cb(chosen);
+        });
+        btnContainer.appendChild(b);
+      });
+      row.appendChild(btnContainer);
+    } else {
+      // single outcome button
+      const sel = document.createElement('button');
+      sel.textContent = 'Choose';
+      sel.style.padding = '8px 12px';
+      sel.style.cursor = 'pointer';
+      sel.style.border = '1px solid #666';
+      sel.style.borderRadius = '6px';
+      sel.style.background = '#f5f5f5';
+      sel.addEventListener('click', () => { cleanup(); cb(rep); });
+      row.appendChild(sel);
     }
-    legalTargets = targetSet;
-    render();
-    return;
+
+    box.appendChild(row);
+  });
+
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  cancel.style.marginTop = '8px';
+  cancel.style.padding = '8px 12px';
+  cancel.style.cursor = 'pointer';
+  cancel.style.border = '1px solid #c33';
+  cancel.style.borderRadius = '6px';
+  cancel.style.background = '#fff';
+  cancel.addEventListener('click', () => { cleanup(); cb(null); });
+  box.appendChild(cancel);
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  function cleanup() { try { overlay.remove(); } catch (e) { overlay.parentNode && overlay.parentNode.removeChild(overlay); } }
+}
+
+// Helper to apply a chosen resolved move and then handle post-move logic
+function applyChosenMove(chosen) {
+  try {
+    state = applyResolvedMove(state, chosen);
+  } catch (err) {
+    console.error('Error applying move:', err);
+    alert('Failed to apply move (see console)');
   }
-
-  // Deselect
-  if (selectedSq === s) {
-    selectedSq = null; legalTargets.clear(); render(); return;
-  }
-
-  // Attempt to move
-  const baseMoves = generatePseudoLegalMoves(state, selectedSq).filter(m => m.to === s);
-  if (baseMoves.length === 0) {
-    selectedSq = null; legalTargets.clear(); render(); return;
-  }
-
-  let outcomes = [];
-  for (const bm of baseMoves) outcomes.push(...expandWithPortalOutcomes(state, bm));
-
-  // Filter outcomes by check legality
-  outcomes = filterLegalByCheck(state, outcomes);
-
-  if (outcomes.length === 0) {
-    selectedSq = null; legalTargets.clear(); render(); return;
-  }
-
-  // If multiple outcomes (portal choices), ask via prompt (MVP-friendly)
-  let chosen = null;
-  if (outcomes.length === 1) {
-    chosen = outcomes[0];
-  } else {
-    const options = outcomes.map(o => {
-      const swapTag = o.viaPortal?.swapped ? " (SWAP)" : "";
-      const choice = o.viaPortal?.choice ?? "STAY";
-      return `${o.toFinal}${o.viaPortal ? ` via ${choice}${swapTag}` : ""}`;
-    });
-    const input = prompt(`Portal choice:\n${options.map((x,i)=>`${i+1}. ${x}`).join("\n")}\nEnter number:`);
-    const choiceIdx = parseInt(input, 10) - 1;
-    if (!Number.isFinite(choiceIdx) || choiceIdx < 0 || choiceIdx >= outcomes.length) {
-      alert("Invalid choice. Move canceled.");
-      selectedSq = null; legalTargets.clear(); render(); return;
-    }
-    chosen = outcomes[choiceIdx];
-  }
-
-  // If the chosen resolved outcome is a promotion, prompt the user for the
-  // desired piece (Q/R/B/N) and attach it to the resolved object before
-  // applying. We prompt here in the UI because the engine expects the
-  // resolved move to carry the promo metadata (e.g., resolved.promo or
-  // resolved.meta.promo). This keeps promotion resolution immediate and
-  // avoids involving portal branching.
-  if (chosen.kind === 'promotion') {
-    let promo = prompt('Promote pawn to (Q/R/B/N):', (chosen.meta && chosen.meta.promo) || 'Q');
-    if (!promo) {
-      alert('Promotion canceled. Move aborted.');
-      selectedSq = null; legalTargets.clear(); render(); return;
-    }
-    promo = promo.trim().toUpperCase();
-    if (!['Q','R','B','N'].includes(promo)) {
-      alert('Invalid promotion piece. Move canceled.');
-      selectedSq = null; legalTargets.clear(); render(); return;
-    }
-    chosen.promo = promo;
-    chosen.meta = chosen.meta || {};
-    chosen.meta.promo = promo;
-  }
-
-  // Apply human move
-  state = applyResolvedMove(state, chosen);
   selectedSq = null; legalTargets.clear(); suggestion = null; render();
 
-  // After human move:
+  // After human move: schedule AI if needed
   if (mode === "vs-ai" && state.turn === aiColor) {
-    // schedule AI move
     setTimeout(() => {
       try {
         const aiMove = getBestMove(state, aiDepth, aiColor);
@@ -289,10 +387,125 @@ function onSquareClick(s) {
         render();
       }
     }, 40);
-  } else {
-    // In analyze/hotseat mode, no automatic AI move; suggestion cleared
-    suggestion = null;
-    render();
+  }
+}
+
+function onSquareClick(s) {
+  // Wrap the entire click handler in try/catch to prevent extension-side
+  // errors (or other unexpected runtime exceptions) from stopping UI flow
+  // while developing in the browser's DevTools. Errors are logged but the
+  // handler will return gracefully so the board remains interactive.
+  try {
+    // If vs-AI and it's AI's turn, ignore clicks
+    if (mode === "vs-ai" && state.turn === aiColor) return;
+
+    // If a portal-selection overlay is active, interpret clicks as selecting
+    // one of the highlighted portal destinations. Only allowed squares are
+    // clickable while in this mode.
+    if (portalSelection) {
+      const su = s.toUpperCase();
+      if (!portalSelection.allowed.has(su)) {
+        // ignore clicks outside allowed set
+        return;
+      }
+      // find an outcome that lands on this square
+      const chosen = portalSelection.outcomes.find(o => (o.toFinal || o.to || '').toUpperCase() === su);
+      // disable overlay first
+      disablePortalSelection();
+      if (chosen) {
+        applyChosenMove(chosen);
+      } else {
+        // should not happen, but recover gracefully
+        selectedSq = null; legalTargets.clear(); render();
+      }
+      return;
+    }
+
+    const idx = FILES.indexOf(s[0]) + 8 * RANKS.indexOf(s[1]);
+    const piece = state.board[idx];
+
+    // In Analyze mode or Hotseat: allow selecting pieces for the side to move
+    if (!selectedSq) {
+      if (!piece || piece.color !== state.turn) return;
+      selectedSq = s;
+      const baseMoves = generatePseudoLegalMoves(state, selectedSq);
+      // Filter via check legality for UI highlights
+      let targetSet = new Set();
+      for (const bm of baseMoves) {
+        const outcomes = expandWithPortalOutcomes(state, bm);
+        const legal = filterLegalByCheck(state, outcomes);
+        for (const o of legal) targetSet.add((o.toFinal || o.to));
+      }
+      legalTargets = targetSet;
+      render();
+      return;
+    }
+
+    // Deselect
+    if (selectedSq === s) {
+      selectedSq = null; legalTargets.clear(); render(); return;
+    }
+
+    // Attempt to move
+    const baseMoves = generatePseudoLegalMoves(state, selectedSq).filter(m => m.to === s);
+    if (baseMoves.length === 0) {
+      selectedSq = null; legalTargets.clear(); render(); return;
+    }
+
+    let outcomes = [];
+    for (const bm of baseMoves) outcomes.push(...expandWithPortalOutcomes(state, bm));
+
+    // Filter outcomes by check legality
+    outcomes = filterLegalByCheck(state, outcomes);
+
+    if (outcomes.length === 0) {
+      selectedSq = null; legalTargets.clear(); render(); return;
+    }
+
+    // If there's exactly one resolved outcome, apply it immediately (or prompt
+    // only for promotion). This avoids showing the chooser/modal for normal
+    // single-step moves.
+    if (outcomes.length === 1) {
+      const single = outcomes[0];
+      if (single.kind === 'promotion') {
+        // show modal for promotion selection (single outcome)
+        showOutcomeChooser([single], chosen => {
+          if (!chosen) { selectedSq = null; legalTargets.clear(); render(); return; }
+          applyChosenMove(chosen);
+        });
+        return;
+      } else {
+        applyChosenMove(single);
+        return;
+      }
+    }
+
+    // If these are portal outcomes (all have viaPortal) and the base move was
+    // not a capture, switch into the in-board portal-selection flow that dims
+    // the board and highlights only the selectable portal destinations.
+    const isPortalOutcomeGroup = outcomes.length > 0 && outcomes.every(o => o.viaPortal);
+    if (isPortalOutcomeGroup && !baseMoves.some(m => m.kind === 'capture')) {
+      const enabled = enablePortalSelection(outcomes, baseMoves);
+      if (!enabled) {
+        // fallback to chooser if something prevented portal selection
+        showOutcomeChooser(outcomes, chosen => { if (chosen) applyChosenMove(chosen); else { selectedSq = null; legalTargets.clear(); render(); } });
+      } else {
+        // Portal selection active — future clicks are handled at top of onSquareClick
+        return;
+      }
+    }
+
+    // Non-portal multi-outcome path: show chooser modal with promo buttons etc.
+    showOutcomeChooser(outcomes, chosen => {
+      if (!chosen) { selectedSq = null; legalTargets.clear(); render(); return; }
+      applyChosenMove(chosen);
+    });
+    return;
+  } catch (err) {
+    console.error('onSquareClick failed:', err);
+    // Try to recover UI state so the board remains usable
+    selectedSq = null; legalTargets.clear(); render();
+    return;
   }
 }
 

@@ -17,15 +17,33 @@
   --black-stroke-width: 0px; /* outline for black pieces (white color) */
 }
 
-body { font-family: system-ui, sans-serif; margin: 16px; }
+.visually-centered { max-width: 980px; margin: 0 auto; padding: 12px; }
+body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #fff; -webkit-font-smoothing:antialiased; }
+
+/* Mobile-first layout: stack controls and board vertically for narrow screens */
+.app-header { padding: 14px 12px 6px 12px; }
+.title { font-size: 20px; font-weight: 700; margin: 0 0 8px 0; }
+.controls { display: flex; gap: 10px; align-items: center; margin: 0 12px 10px 12px; flex-wrap: wrap; }
+.controls label { font-size: 15px; display: flex; gap: 8px; align-items: center; }
+.controls button { padding: 8px 12px; font-size: 16px; border-radius: 8px; }
+
+/* Board container: scale to viewport width on mobile, keep square via aspect-ratio */
 .board {
-  width: 384px; height: 384px;
-  display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
-  border: 2px solid #333; user-select: none;
+  --board-size: min(94vw, 640px);
+  width: var(--board-size);
+  aspect-ratio: 1 / 1;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  border: 2px solid #333;
+  margin: 8px auto 20px auto;
+  user-select: none;
+  touch-action: manipulation;
 }
+
 .square {
   position: relative; display: flex; align-items: center; justify-content: center;
-  font-size: var(--piece-font-size); cursor: pointer;
+  font-size: calc(var(--board-size) / 13); cursor: pointer; -webkit-tap-highlight-color: rgba(0,0,0,0.05);
 }
 .square.light { background: var(--light); }
 .square.dark { background: var(--dark); }
@@ -225,15 +243,15 @@ body { font-family: system-ui, sans-serif; margin: 16px; }
  /* ---------- Append this at the END of your existing styles.css ---------- */
 
 /* Controls panel (mode, AI, suggest, reset) */
-.controls {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+.status-bar { margin: 0 12px 6px 12px; font-size: 15px; }
+
+/* Larger screens: use a wider layout with horizontal spacing */
+@media (min-width: 760px) {
+  .app-header { display:flex; align-items:center; justify-content:space-between; padding: 18px 20px; }
+  .title { font-size: 28px; }
+  .controls { margin: 0; }
+  .board { --board-size: 560px; }
 }
-.controls label { font-size: 14px; display: flex; gap: 6px; align-items: center; }
-.controls button { padding: 6px 8px; font-size: 14px; cursor: pointer; }
 
 /* Suggestion highlight (AI suggestion square) */
 .square.suggest {
