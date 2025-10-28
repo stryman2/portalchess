@@ -1,6 +1,6 @@
 :root {
-  --light: #ece0c9;
-  --dark: #ca7743d0;
+  --light: #DFDFDF;
+  --dark: #7085B6;
 
   /* portal fill opacity: change this value to tweak portal transparency globally */
   --portal-fill-alpha: 0.8;
@@ -18,7 +18,7 @@
 }
 
 .visually-centered { max-width: 980px; margin: 0 auto; padding: 12px; }
-body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #fff; -webkit-font-smoothing:antialiased; }
+body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #000; color: #fff; -webkit-font-smoothing:antialiased; }
 
 /* Mobile-first layout: stack controls and board vertically for narrow screens */
 .app-header { padding: 14px 12px 6px 12px; }
@@ -35,15 +35,17 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
-  border: 2px solid #333;
+  border: none; /* removed frame as requested */
   margin: 8px auto 20px auto;
   user-select: none;
   touch-action: manipulation;
+  box-sizing: border-box;
 }
 
 .square {
   position: relative; display: flex; align-items: center; justify-content: center;
   font-size: calc(var(--board-size) / 13); cursor: pointer; -webkit-tap-highlight-color: rgba(0,0,0,0.05);
+  color: #fff; /* ensure piece glyph contrast on black background */
 }
 .square.light { background: var(--light); }
 .square.dark { background: var(--dark); }
@@ -243,7 +245,7 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f
  /* ---------- Append this at the END of your existing styles.css ---------- */
 
 /* Controls panel (mode, AI, suggest, reset) */
-.status-bar { margin: 0 12px 6px 12px; font-size: 15px; }
+.status-bar { margin: 0 12px 6px 12px; font-size: 15px; color: #fff; }
 
 /* Larger screens: use a wider layout with horizontal spacing */
 @media (min-width: 760px) {
@@ -251,6 +253,23 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f
   .title { font-size: 28px; }
   .controls { margin: 0; }
   .board { --board-size: 560px; }
+}
+
+/* Mobile: make the board full-bleed edge-to-edge and keep it square */
+@media (max-width: 759px) {
+  .visually-centered { padding: 0; }
+  .app-header { padding-left: 10px; padding-right: 10px; }
+  .board {
+    --board-size: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
+    width: var(--board-size);
+    margin: 0; /* full-bleed */
+    max-width: none;
+    border: none;
+    box-shadow: none;
+  }
+  /* make sure controls and status are legible on black */
+  .title, .controls label, .status-bar { color: #fff; }
+  .controls button { color: #fff; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); }
 }
 
 /* Suggestion highlight (AI suggestion square) */
