@@ -6,6 +6,7 @@ import {
   applyResolvedMove,
   isSquareAttacked,
   filterLegalByCheck,
+  SOUND_FILES,
 } from "./engine.js";
 
 import { getBestMove } from "./ai.js";
@@ -38,8 +39,123 @@ const PIECE_IMG_PATH = "pieces/cburnett";
   const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 })();
 
+// --- Audio synthesis (small inlined WebAudio helper, no external files) ---
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+  }
+}
+function playTone(freq, type = 'sine', dur = 0.12, vol = 0.08, nowOffset = 0) {
+  if (typeof window === 'undefined') return;
+  ensureAudio();
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime + nowOffset;
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  try {
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(vol, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  } catch (e) {
+    // ignore audio errors silently
+  }
+}
+
+function playSoundForResolved(resolved, afterState) {
+  try {
+    ensureAudio();
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    const via = resolved && resolved.viaPortal;
+    const kind = resolved && resolved.kind;
+
+    // Prefer sample playback if available (loaded by loadAudioAssets)
+    const sampleKey = (kind === 'promotion') ? 'promotion'
+      : (kind === 'capture' || (via && via.swapped)) ? 'capture'
+      : (via) ? 'portal'
+      : (kind === 'castle') ? 'castle'
+      : 'move';
+
+    if (audioBuffers && audioBuffers[sampleKey]) {
+      playBuffer(audioBuffers[sampleKey]);
+    } else {
+      // fallback to synthesized tones if samples missing
+      if (kind === 'promotion') {
+        playTone(1100, 'sine', 0.12, 0.09);
+        playTone(1500, 'sine', 0.12, 0.07, 0.06);
+      } else if (kind === 'capture' || (via && via.swapped)) {
+        playTone(700, 'sawtooth', 0.16, 0.12);
+        playTone(420, 'sine', 0.18, 0.08, 0.02);
+      } else if (via) {
+        playTone(880, 'triangle', 0.18, 0.09);
+        playTone(1320, 'sine', 0.12, 0.06, 0.04);
+      } else if (kind === 'castle') {
+        playTone(720, 'square', 0.14, 0.08);
+      } else {
+        playTone(920, 'sine', 0.12, 0.07);
+      }
+    }
+
+    // If the move left the opponent in check, play a short staccato indicator
+    if (afterState) {
+      try {
+        const opponent = afterState.turn;
+        if (inCheck(afterState, opponent)) {
+          // prefer check sample when present
+          if (audioBuffers && audioBuffers.check) playBuffer(audioBuffers.check);
+          else playTone(1600, 'sine', 0.06, 0.12, 0.04);
+        }
+      } catch (e) { /* ignore check-detection errors */ }
+    }
+  } catch (e) {
+    // swallow audio errors to avoid breaking game flow
+  }
+}
+
+let audioBuffers = {};
+
+function playBuffer(buffer) {
+  if (!audioCtx || !buffer) return;
+  try {
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    const g = audioCtx.createGain();
+    g.gain.value = 0.9;
+    src.connect(g); g.connect(audioCtx.destination);
+    src.start();
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function loadAudioAssets() {
+  ensureAudio();
+  if (!audioCtx) return;
+  const entries = Object.entries(SOUND_FILES);
+  for (const [key, path] of entries) {
+    try {
+      const resp = await fetch(path, { cache: 'force-cache' });
+      if (!resp.ok) throw new Error('Not found');
+      const ab = await resp.arrayBuffer();
+      const buf = await audioCtx.decodeAudioData(ab.slice(0));
+      audioBuffers[key] = buf;
+      console.log(`Loaded audio asset: ${key} <- ${path}`);
+    } catch (e) {
+      console.warn(`Audio asset not available: ${path} (${e && e.message})`);
+    }
+  }
+}
+
 // Portal selection runtime state (null when inactive)
 let portalSelection = null;
+// Track the most recent move applied in the UI. Shape: { from: 'E2', to: 'E4' } (upper-case)
+let lastMove = null;
 
 function enablePortalSelection(outcomes, baseMoves) {
   // Only enable when outcomes are portal outcomes and the originating base move
@@ -87,6 +203,13 @@ let mode = modeSelect.value; // 'hotseat' | 'vs-ai' | 'analyze'
 let aiColor = aiColorSelect.value; // 'w'|'b'
 let aiDepth = parseInt(aiDepthInput.value, 10) || 3;
 let __dev_safety_wrapper_installed = true; // marker
+
+// --- Online (Socket.io) state ---
+let socket = null;
+let onlineRoomId = null;
+let onlineColor = null; // 'w' or 'b'
+let isHost = false;
+let onlinePanel = null;
 
 function isLight(fileIdx, rankIdx) { return (fileIdx + rankIdx) % 2 === 1; }
 function sq(fileIdx, rankIdx) { return `${FILES[fileIdx]}${RANKS[rankIdx]}`; }
@@ -186,6 +309,13 @@ function render() {
       }
 
       if (selectedSq === s || legalTargets.has(s)) div.classList.add("highlight");
+
+      // last-move overlay: highlight origin and destination of the most recent move
+      if (lastMove) {
+        const lu = lastMove.from && lastMove.from.toUpperCase();
+        const ld = lastMove.to && lastMove.to.toUpperCase();
+        if (su === lu || su === ld) div.classList.add('last-move');
+      }
 
       // show suggestion target highlight
       if (suggestion) {
@@ -362,12 +492,44 @@ function showOutcomeChooser(outcomes, cb) {
 
 // Helper to apply a chosen resolved move and then handle post-move logic
 function applyChosenMove(chosen) {
+  // If we're in online mode, send the chosen resolved move to the server for validation
+  if (mode === 'online') {
+    if (!onlineRoomId) {
+      alert('Not connected to an online room.');
+      return;
+    }
+    const s = connectSocket();
+    if (!s) { alert('Socket connection is not available. Make sure the page is served by the game server.'); return; }
+    // disable UI briefly while waiting for server reply
+    selectedSq = null; legalTargets.clear(); suggestion = null; render();
+    s.emit('makeMove', { roomId: onlineRoomId, resolved: chosen }, (ack) => {
+      if (!ack) {
+        alert('No response from server');
+        return;
+      }
+      if (ack.error) {
+        alert('Move rejected: ' + (ack.error || 'illegal'));
+        // re-render to restore UI state
+        render();
+        return;
+      }
+      // otherwise, server will broadcast moveMade and update state; nothing more to do here
+    });
+    return;
+  }
+
+  // Local (non-online) mode: apply move immediately
   try {
     state = applyResolvedMove(state, chosen);
   } catch (err) {
     console.error('Error applying move:', err);
     alert('Failed to apply move (see console)');
   }
+  // Record last move (from/to) for highlighting, then play sound and update UI
+  try {
+    lastMove = { from: (chosen.from || '').toUpperCase(), to: ((chosen.toFinal || chosen.to) || '').toUpperCase() };
+  } catch (e) { lastMove = null; }
+  try { playSoundForResolved(chosen, state); } catch (e) {}
   selectedSq = null; legalTargets.clear(); suggestion = null; render();
 
   // After human move: schedule AI if needed
@@ -377,6 +539,9 @@ function applyChosenMove(chosen) {
         const aiMove = getBestMove(state, aiDepth, aiColor);
         if (aiMove) {
           state = applyResolvedMove(state, aiMove);
+            // record and play sound for AI move
+            try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
+            try { playSoundForResolved(aiMove, state); } catch (e) {}
           suggestion = null;
           render();
         } else {
@@ -522,11 +687,39 @@ modeSelect.addEventListener("change", e => {
   if (mode === "vs-ai" && state.turn === aiColor) {
     setTimeout(() => {
       const aiMove = getBestMove(state, aiDepth, aiColor);
-      if (aiMove) { state = applyResolvedMove(state, aiMove); render(); }
+      if (aiMove) {
+        state = applyResolvedMove(state, aiMove);
+        try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
+        try { playSoundForResolved(aiMove, state); } catch (e) {}
+        render();
+      }
     }, 40);
+  }
+
+  // If switching to online, connect and either create or join a room based on URL
+  if (mode === 'online') {
+    // if URL contains /play/<id>, auto-join
+    const parts = window.location.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2 && parts[0] === 'play') {
+      const roomId = parts[1];
+      joinRoomOnServer(roomId);
+    } else {
+      // create a room automatically for the host
+      createRoomOnServer();
+    }
   }
   render();
 });
+
+// On load: if the path is /play/<roomId> then switch to online mode automatically
+(function autoJoinFromPath() {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (parts.length >= 2 && parts[0] === 'play') {
+    modeSelect.value = 'online';
+    mode = 'online';
+    joinRoomOnServer(parts[1]);
+  }
+})();
 
 aiColorSelect.addEventListener("change", e => {
   aiColor = e.target.value;
@@ -568,6 +761,8 @@ applySuggestionBtn.addEventListener("click", () => {
   }
   try {
     state = applyResolvedMove(state, suggestion);
+    try { lastMove = { from: (suggestion.from || '').toUpperCase(), to: ((suggestion.toFinal || suggestion.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
+    try { playSoundForResolved(suggestion, state); } catch (e) {}
     suggestion = null;
     render();
   } catch (err) {
@@ -580,6 +775,8 @@ applySuggestionBtn.addEventListener("click", () => {
 resetBtn.addEventListener("click", () => {
   state = initialState();
   selectedSq = null; legalTargets.clear(); suggestion = null;
+  // clear last-move highlight on reset
+  lastMove = null;
   render();
 });
 
@@ -590,7 +787,111 @@ resetBtn.addEventListener("click", () => {
   suggestBtn.style.display = (mode === "analyze" || mode === "vs-ai") ? "inline-block" : "none";
   applySuggestionBtn.style.display = (mode === "analyze") ? "inline-block" : "none";
   render();
+  // Attempt to load external audio assets (non-blocking). If assets are not
+  // present the code will silently fall back to synthesized tones.
+  loadAudioAssets().then(() => {
+    console.log('Audio assets loader finished');
+  }).catch(err => {
+    console.warn('Audio loader error', err);
+  });
 })();
+
+// Build an online panel inside the controls area for room info
+function ensureOnlinePanel() {
+  if (onlinePanel) return onlinePanel;
+  const controls = document.getElementById('controls');
+  const panel = document.createElement('div');
+  panel.id = 'onlinePanel';
+  panel.style.display = 'none';
+  panel.style.marginLeft = '8px';
+  panel.style.padding = '6px';
+  panel.style.border = '1px solid #ddd';
+  panel.style.borderRadius = '6px';
+  panel.style.background = '#fff';
+
+  const info = document.createElement('div'); info.id = 'onlineInfo'; panel.appendChild(info);
+  const link = document.createElement('input'); link.id = 'onlineLink'; link.style.width = '260px'; link.readOnly = true; panel.appendChild(link);
+  const copyBtn = document.createElement('button'); copyBtn.textContent = 'Copy Link'; copyBtn.style.marginLeft = '6px';
+  copyBtn.addEventListener('click', () => { try { link.select(); document.execCommand('copy'); } catch(e){} });
+  panel.appendChild(copyBtn);
+
+  controls.appendChild(panel);
+  onlinePanel = panel;
+  return panel;
+}
+
+function showOnlinePanel(text, link) {
+  const p = ensureOnlinePanel();
+  const info = p.querySelector('#onlineInfo');
+  const input = p.querySelector('#onlineLink');
+  info.textContent = text || '';
+  input.value = link || '';
+  p.style.display = 'inline-block';
+}
+
+function hideOnlinePanel() { if (onlinePanel) onlinePanel.style.display = 'none'; }
+
+function connectSocket() {
+  if (socket) return socket;
+  if (typeof io === 'undefined') {
+    console.warn('socket.io client not available globally (io). Online mode requires served app via server.');
+    return null;
+  }
+  socket = io();
+
+  socket.on('connect', () => { console.log('connected to server', socket.id); });
+
+  socket.on('gameStart', ({ roomId, color, state: serverState }) => {
+    onlineRoomId = roomId;
+    onlineColor = color;
+    // adopt server state and render
+    try { state = serverState; } catch (e) {}
+    showOnlinePanel(`Room: ${roomId} — You are ${color === 'w' ? 'White' : 'Black'}`, window.location.origin + '/play/' + roomId);
+    render();
+  });
+
+  socket.on('moveMade', ({ resolved, state: serverState }) => {
+    try { state = serverState; lastMove = { from: (resolved.from||'').toUpperCase(), to: ((resolved.toFinal||resolved.to)||'').toUpperCase() }; } catch (e) {}
+    try { playSoundForResolved(resolved, state); } catch (e) {}
+    render();
+  });
+
+  socket.on('moveRejected', (data) => {
+    alert('Move rejected by server');
+  });
+
+  socket.on('disconnect', () => { console.log('socket disconnected'); socket = null; onlineRoomId = null; onlineColor = null; hideOnlinePanel(); });
+
+  return socket;
+}
+
+function createRoomOnServer() {
+  const s = connectSocket();
+  if (!s) return;
+  s.emit('createRoom', (res) => {
+    if (res && res.roomId) {
+      onlineRoomId = res.roomId; isHost = true; onlineColor = 'w';
+      const link = window.location.origin + '/play/' + res.roomId;
+      history.replaceState(null, '', '/'); // keep path clean until user shares link
+      showOnlinePanel(`Room created: ${res.roomId} — Share link to invite`, link);
+    } else {
+      alert('Failed to create room');
+    }
+  });
+}
+
+function joinRoomOnServer(roomId) {
+  const s = connectSocket();
+  if (!s) return;
+  s.emit('joinRoom', { roomId }, (res) => {
+    if (res && res.error) {
+      alert('Failed to join room: ' + res.error);
+    } else {
+      onlineRoomId = roomId; isHost = false;
+      showOnlinePanel(`Joined room: ${roomId} — waiting for opponent...`, window.location.origin + '/play/' + roomId);
+    }
+  });
+}
 
 // Development helper: expose engine initialState to the window so snippets/tests
 // that call `window.initialState()` (e.g., quick dev console tests) work.

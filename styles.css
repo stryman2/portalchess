@@ -1,9 +1,9 @@
 :root {
-  --light: #DFDFDF;
+  --light: #eeeeee;
   --dark: #7085B6;
 
   /* portal fill opacity: change this value to tweak portal transparency globally */
-  --portal-fill-alpha: 0.8;
+  --portal-fill-alpha: 0;
 
   --portal-white: #85c5ff; /* white-exclusive portals */
   --portal-black: #c8a0ff; /* black-exclusive portals */
@@ -81,7 +81,7 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
   box-shadow: 0 0 0 2px var(--stroke-color), 0 0 16px 8px var(--glow-color);
 }
 .square.portal-neutral {
-  --stroke-color: #a0a594; /* neutral fill color per your latest request */
+  --stroke-color: #56633a; /* neutral fill color per your latest request */
   --glow-color: rgba(160,165,148,0.45);
   animation: portalFramePulse 3s ease-in-out infinite;
   background: rgba(160,165,148,var(--portal-fill-alpha));
@@ -98,7 +98,7 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
   border-radius: 12px;
   pointer-events: none;
   filter: blur(6px) saturate(120%);
-  mix-blend-mode: screen; /* helps the aura feel luminous while keeping square colors */
+  mix-blend-mode: multiply; /* helps the aura feel luminous while keeping square colors */
   z-index: 0;
   transform-origin: 50% 50%;
   animation: portalPulse 2.6s ease-in-out infinite;
@@ -108,12 +108,12 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
   background: radial-gradient(circle at 100% 80%, rgba(133,197,255,0.92) 100%, rgba(255,223,140,0.28) 100%, rgba(133,197,255,0.06) 70%, transparent 100%);
 }
 .square.portal-black::before {
-  background: radial-gradient(circle at 50% 40%, rgba(200,160,255,0.92) 0%, rgba(90,40,120,0.28) 30%, rgba(60,20,90,0.06) 55%, transparent 70%);
+  background: radial-gradient(circle at 50% 40%, rgba(200,160,255,0.92) 100%, rgba(90,40,120,0.28) 30%, rgba(60,20,90,0.06) 55%, transparent 70%);
   mix-blend-mode: multiply; /* darker, shadowy effect */
 }
 .square.portal-neutral::before {
-  background: radial-gradient(circle at 50% 40%, rgba(207,210,214,0.9) 0%, rgba(180,150,110,0.28) 30%, rgba(200,200,190,0.06) 55%, transparent 70%);
-  mix-blend-mode: overlay;
+  background: radial-gradient(circle at 50% 50%, rgba(196, 197, 176, 0.9) 100%, rgba(180,150,110,0.28) 30%, rgba(200,200,190,0.06) 55%, transparent 70px);
+  mix-blend-mode: multiply;
 }
 
 /* subtle moving shimmer overlay */
@@ -283,4 +283,25 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
   /* keep the painted neutral color readable while indicating cooldown */
   box-shadow: 0 0 6px 2px rgba(0,0,0,0.10) inset !important;
   opacity: 0.98;
+}
+
+/* Last-move highlight: applied to both origin and destination of the most recent move */
+.square.last-move { position: relative; z-index: 2; box-shadow: inset 0 0 0 3px rgba(240,230,120,0.98), 0 6px 18px rgba(0,0,0,0.50); border-radius:2px; }
+.square.last-move::after { content: ''; position: absolute; left: 4px; right: 4px; top: 4px; bottom: 4px; border-radius: 5px; pointer-events: none; box-shadow: 0 0 18px rgba(240,230,120,0.35); }
+
+/* Ensure portal squares preserve the original board square colors
+   (light/dark) in their center while allowing aura/pseudo-elements to
+   render on top. This forces the background to the board tokens so
+   portals never appear fully black or painted-over. */
+.square.portal-white.light,
+.square.portal-black.light,
+.square.portal-neutral.light {
+  background: var(--light) !important;
+  color: inherit !important;
+}
+.square.portal-white.dark,
+.square.portal-black.dark,
+.square.portal-neutral.dark {
+  background: var(--dark) !important;
+  color: inherit !important;
 }

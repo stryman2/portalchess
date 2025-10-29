@@ -19,6 +19,7 @@
         <option value="hotseat">Hotseat (2 players)</option>
         <option value="vs-ai">Play vs AI</option>
         <option value="analyze">Analyze (play both, ask engine)</option>
+        <option value="online">Online (Private Room)</option>
       </select>
     </label>
 
@@ -46,6 +47,8 @@
     <div id="board" class="board" aria-label="Chessboard"></div>
   </div>
 
+  <!-- Socket.io client (served by the server) -->
+  <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="ui.js"></script>
 </body>
 </html>
