@@ -213,6 +213,40 @@ let onlineColor = null; // 'w' or 'b'
 let isHost = false;
 let onlinePanel = null;
 
+// Rehydrate server-sent state to the client's expected shapes (Sets for portals)
+function hydrateState(srvState) {
+  if (!srvState) return srvState;
+  const s = typeof structuredClone === 'function' ? structuredClone(srvState) : JSON.parse(JSON.stringify(srvState));
+  try {
+    if (s.portals) {
+      // If portals.white/black arrived as arrays or plain objects, convert to Set
+      if (!s.portals.white || typeof s.portals.white.has !== 'function') {
+        try { s.portals.white = new Set(Array.isArray(s.portals.white) ? s.portals.white.map(x => (x||'').toUpperCase()) : Object.keys(s.portals.white || {})); } catch(e) { s.portals.white = new Set(); }
+      }
+      if (!s.portals.black || typeof s.portals.black.has !== 'function') {
+        try { s.portals.black = new Set(Array.isArray(s.portals.black) ? s.portals.black.map(x => (x||'').toUpperCase()) : Object.keys(s.portals.black || {})); } catch(e) { s.portals.black = new Set(); }
+      }
+      // neutralPairs may be an array of pairs; keep as-is
+      if (!Array.isArray(s.portals.neutralPairs)) s.portals.neutralPairs = s.portals.neutralPairs || [];
+    }
+  } catch (e) {
+    // if anything goes wrong, return the server state as-is
+    return srvState;
+  }
+  // If hydration produced empty portal sets (because server serialized Sets
+  // into plain objects), fall back to the client's engine default portal map
+  // so UI helpers like .has() behave correctly.
+  try {
+    const defaults = initialState().portals || {};
+    if (s.portals) {
+      if (s.portals.white && s.portals.white.size === 0 && defaults.white) s.portals.white = defaults.white;
+      if (s.portals.black && s.portals.black.size === 0 && defaults.black) s.portals.black = defaults.black;
+      if (!s.portals.neutralPairs || s.portals.neutralPairs.length === 0) s.portals.neutralPairs = defaults.neutralPairs || [];
+    }
+  } catch (e) { /* ignore fallback errors */ }
+  return s;
+}
+
 function isLight(fileIdx, rankIdx) { return (fileIdx + rankIdx) % 2 === 1; }
 function sq(fileIdx, rankIdx) { return `${FILES[fileIdx]}${RANKS[rankIdx]}`; }
 
@@ -851,13 +885,13 @@ function connectSocket() {
     onlineRoomId = roomId;
     onlineColor = color;
     // adopt server state and render
-    try { state = serverState; } catch (e) {}
+    try { state = hydrateState(serverState); } catch (e) { state = serverState; }
     showOnlinePanel(`Room: ${roomId} — You are ${color === 'w' ? 'White' : 'Black'}`, window.location.origin + '/play/' + roomId);
     render();
   });
 
   socket.on('moveMade', ({ resolved, state: serverState }) => {
-    try { state = serverState; lastMove = { from: (resolved.from||'').toUpperCase(), to: ((resolved.toFinal||resolved.to)||'').toUpperCase() }; } catch (e) {}
+    try { state = hydrateState(serverState); lastMove = { from: (resolved.from||'').toUpperCase(), to: ((resolved.toFinal||resolved.to)||'').toUpperCase() }; } catch (e) { state = serverState; }
     try { playSoundForResolved(resolved, state); } catch (e) {}
     render();
   });

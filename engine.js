@@ -860,10 +860,10 @@ export function filterLegalByCheck(state, resolvedMoves) {
 }
 // --- Sample-based audio loader ---
 export const SOUND_FILES = {
-  move: 'sounds/move.mp3',
-  capture: 'sounds/capture.mp3',
-  portal: 'sounds/portal.mp3',
-  promotion: 'sounds/promotion.mp3',
-  check: 'sounds/check.mp3',
-  castle: 'sounds/castle.mp3'
+  move: '/sounds/move.mp3',
+  capture: '/sounds/capture.mp3',
+  portal: '/sounds/portal.mp3',
+  promotion: '/sounds/promotion.mp3',
+  check: '/sounds/check.mp3',
+  castle: '/sounds/castle.mp3'
 };
