@@ -23,12 +23,18 @@ app.use(express.static(path.join(__dirname)));
 // the catch-all from responding to requests for actual static assets
 // (like .js/.css) which should be served by express.static above.
 app.get('*', (req, res) => {
-  if (req.accepts && req.accepts('html')) {
+  // Only serve index.html for navigational requests that accept HTML and
+  // that don't look like requests for a static file (no extension).
+  // This avoids returning index.html for requests such as /ui.js which
+  // should be handled by express.static and must return JS with correct
+  // MIME types.
+  const hasExt = !!path.extname(req.path);
+  if (req.accepts && req.accepts('html') && !hasExt) {
     res.sendFile(path.join(__dirname, 'index.html'));
   } else {
-    // Let the static middleware have handled files; if we reach here the
-    // asset wasn't found — return 404 rather than index.html to avoid
-    // serving HTML for JS module requests (fixes MIME type error).
+    // If the request explicitly looks like a static asset (has an
+    // extension) or does not accept HTML, return 404 so that the client
+    // doesn't receive HTML where JS/CSS is expected.
     res.status(404).send('Not found');
   }
 });
