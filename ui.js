@@ -25,8 +25,10 @@ const aiDepthLabel = document.getElementById("aiDepthLabel");
 
 const FILES = "ABCDEFGH".split("");
 const RANKS = "12345678".split("");
-// Path to local SVG piece set. Place cburnett SVGs under this folder with names like 'wP.svg', 'bK.svg', etc.
-const PIECE_IMG_PATH = "pieces/cburnett";
+// Path to local SVG piece set (use absolute path so deep-linking to /play/:id
+// still resolves images from site root). Place cburnett SVGs under this folder
+// with names like 'wP.svg', 'bK.svg', etc.
+const PIECE_IMG_PATH = "/pieces/cburnett";
 
 // Inject minimal CSS for portal selection overlay/highlights (kept local so
 // edits don't require changes to styles.css).
