@@ -862,8 +862,8 @@ export function filterLegalByCheck(state, resolvedMoves) {
 export const SOUND_FILES = {
   move: 'sounds/move.mp3',
   capture: 'sounds/capture.mp3',
-  portal: 'sounds/portal.wav',
-  promotion: 'sounds/promotion.wav',
-  check: 'sounds/check.wav',
-  castle: 'sounds/castle.wav'
+  portal: 'sounds/portal.mp3',
+  promotion: 'sounds/promotion.mp3',
+  check: 'sounds/check.mp3',
+  castle: 'sounds/castle.mp3'
 };

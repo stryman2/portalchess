@@ -19,8 +19,18 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname)));
 
 // Fallback to index.html for SPA/room deep links like /play/:id
+// But only return index.html for requests that accept HTML. This prevents
+// the catch-all from responding to requests for actual static assets
+// (like .js/.css) which should be served by express.static above.
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  if (req.accepts && req.accepts('html')) {
+    res.sendFile(path.join(__dirname, 'index.html'));
+  } else {
+    // Let the static middleware have handled files; if we reach here the
+    // asset wasn't found — return 404 rather than index.html to avoid
+    // serving HTML for JS module requests (fixes MIME type error).
+    res.status(404).send('Not found');
+  }
 });
 
 // Simple in-memory rooms store. { roomId: { sockets: Set, state, locked, hostSocketId } }

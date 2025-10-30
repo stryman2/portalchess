@@ -837,9 +837,10 @@ function connectSocket() {
     console.warn('socket.io client not available globally (io). Online mode requires served app via server.');
     return null;
   }
-  const SERVER_URL = window.location.hostname === 'localhost'
-  ? 'http://localhost:3000'
-  : 'https://portalchess.onrender.com/';
+  // Connect to localhost (dev) or the production Render URL
+  const SERVER_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000'
+    : 'https://portalchess.onrender.com';
   socket = io(SERVER_URL);
 
   socket.on('connect', () => { console.log('connected to server', socket.id); });
