@@ -20,6 +20,7 @@ const aiDepthInput = document.getElementById("aiDepthInput");
 const suggestBtn = document.getElementById("suggestBtn");
 const applySuggestionBtn = document.getElementById("applySuggestionBtn");
 const resetBtn = document.getElementById("resetBtn");
+const flipBtn = document.getElementById("flipBtn");
 const aiColorLabel = document.getElementById("aiColorLabel");
 const aiDepthLabel = document.getElementById("aiDepthLabel");
 
@@ -206,6 +207,13 @@ let aiColor = aiColorSelect.value; // 'w'|'b'
 let aiDepth = parseInt(aiDepthInput.value, 10) || 3;
 let __dev_safety_wrapper_installed = true; // marker
 
+// Board orientation: false = white at bottom (default), true = flipped (black at bottom)
+let boardFlipped = false;
+try {
+  const saved = localStorage.getItem('boardFlipped');
+  if (saved === 'true' || saved === 'false') boardFlipped = saved === 'true';
+} catch (e) {}
+
 // --- Online (Socket.io) state ---
 let socket = null;
 let onlineRoomId = null;
@@ -260,17 +268,19 @@ function clearSuggestion() { suggestion = null; render(); }
 
 function render() {
   boardEl.innerHTML = "";
-  for (let r = 7; r >= 0; r--) {
-    for (let f = 0; f < 8; f++) {
-      const s = sq(f, r);
-      const su = s.toUpperCase();
-      const div = document.createElement("div");
-      div.className = `square ${isLight(f,r) ? "light" : "dark"}`;
-      // expose square id for portal-selection wiring
-      div.dataset.sq = su;
-
-      // compute index for board access early
-      const idx = FILES.indexOf(su[0]) + 8 * RANKS.indexOf(su[1]);
+  if (!boardFlipped) {
+    // White at bottom (default): render rows top->bottom (r=7..0), files left->right (f=0..7)
+    for (let r = 7; r >= 0; r--) {
+      for (let f = 0; f < 8; f++) {
+        const fIdx = f, rIdx = r;
+        const s = sq(fIdx, rIdx);
+        const su = s.toUpperCase();
+        const div = document.createElement("div");
+        div.className = `square ${isLight(fIdx,rIdx) ? "light" : "dark"}`;
+        // expose square id for portal-selection wiring
+        div.dataset.sq = su;
+        // compute index for board access early
+        const idx = FILES.indexOf(su[0]) + 8 * RANKS.indexOf(su[1]);
       const piece = state.board[idx];
 
       // Portal coloring and cooldown hint
@@ -403,8 +413,137 @@ function render() {
       coords.textContent = s.toLowerCase();
       div.appendChild(coords);
 
-      div.addEventListener("click", () => onSquareClick(s));
-      boardEl.appendChild(div);
+        div.addEventListener("click", () => onSquareClick(s));
+        boardEl.appendChild(div);
+      }
+    }
+  } else {
+    // Flipped: render rows top->bottom as seen by a black player rotated 180deg.
+    // Iterate ranks 0..7 and files 7..0 so that top-left becomes H1 and bottom-left becomes H8
+    for (let r = 0; r < 8; r++) {
+      for (let f = 7; f >= 0; f--) {
+        const fIdx = f, rIdx = r;
+        const s = sq(fIdx, rIdx);
+        const su = s.toUpperCase();
+        const div = document.createElement("div");
+        div.className = `square ${isLight(fIdx,rIdx) ? "light" : "dark"}`;
+        div.dataset.sq = su;
+
+        const idx = FILES.indexOf(su[0]) + 8 * RANKS.indexOf(su[1]);
+        const piece = state.board[idx];
+
+        // Portal coloring and cooldown hint
+        if (isWhitePortal(su)) {
+          div.classList.add("portal-white");
+          const p = document.createElement('div');
+          p.className = 'portal-visual portal-white';
+          for (let si = 0; si < 12; si++) {
+            const spark = document.createElement('i');
+            const angle = Math.random() * 360;
+            const dist = 10 + Math.random() * 26;
+            const delay = (Math.random() * -3).toFixed(2) + 's';
+            spark.style.setProperty('--angle', angle + 'deg');
+            spark.style.setProperty('--dist', dist + 'px');
+            spark.style.setProperty('--delay', delay);
+            p.appendChild(spark);
+          }
+          div.appendChild(p);
+        } else if (isBlackPortal(su)) {
+          div.classList.add("portal-black");
+          const p = document.createElement('div');
+          p.className = 'portal-visual portal-black';
+          for (let si = 0; si < 12; si++) {
+            const spark = document.createElement('i');
+            const angle = Math.random() * 360;
+            const dist = 10 + Math.random() * 26;
+            const delay = (Math.random() * -3).toFixed(2) + 's';
+            spark.style.setProperty('--angle', angle + 'deg');
+            spark.style.setProperty('--dist', dist + 'px');
+            spark.style.setProperty('--delay', delay);
+            p.appendChild(spark);
+          }
+          div.appendChild(p);
+        } else if (isNeutralPortal(su)) {
+          div.classList.add("portal-neutral");
+          const p = document.createElement('div');
+          p.className = 'portal-visual portal-neutral';
+          for (let si = 0; si < 10; si++) {
+            const spark = document.createElement('i');
+            const angle = Math.random() * 360;
+            const dist = 8 + Math.random() * 22;
+            const delay = (Math.random() * -3).toFixed(2) + 's';
+            spark.style.setProperty('--angle', angle + 'deg');
+            spark.style.setProperty('--dist', dist + 'px');
+            spark.style.setProperty('--delay', delay);
+            p.appendChild(spark);
+          }
+          div.appendChild(p);
+          if (state.neutralSwapCooldown) {
+            if (piece && state.neutralSwapCooldown[piece.color]) {
+              div.classList.add("cooldown");
+              const lock = document.createElement("span");
+              lock.className = "cooldown-lock";
+              lock.textContent = "🔒";
+              lock.style.position = "absolute";
+              lock.style.right = "4px";
+              lock.style.top = "4px";
+              lock.style.fontSize = "14px";
+              lock.style.lineHeight = "1";
+              lock.style.pointerEvents = "none";
+              lock.style.opacity = "0.9";
+              lock.title = "Neutral portal temporarily disabled for this player";
+              div.appendChild(lock);
+            }
+          }
+        }
+
+        if (selectedSq === s || legalTargets.has(s)) div.classList.add("highlight");
+
+        if (lastMove) {
+          const lu = lastMove.from && lastMove.from.toUpperCase();
+          const ld = lastMove.to && lastMove.to.toUpperCase();
+          if (su === lu || su === ld) div.classList.add('last-move');
+        }
+
+        if (suggestion) {
+          const dest = (suggestion.toFinal || suggestion.to).toUpperCase();
+          if (dest === su) div.classList.add("suggest");
+        }
+
+        if (piece) {
+          if (!navigator.onLine) {
+            const span = document.createElement('span');
+            span.className = `piece piece-${piece.color}`;
+            span.textContent = pieceToGlyph(piece);
+            div.appendChild(span);
+          } else {
+            const img = document.createElement('img');
+            img.className = `piece piece-${piece.color}`;
+            const fileName = `${piece.color}${piece.type}.svg`;
+            img.src = `${PIECE_IMG_PATH}/${fileName}`;
+            img.alt = `${piece.color}${piece.type}`;
+            img.style.width = '100%'; img.style.height = '100%'; img.style.display = 'block'; img.style.pointerEvents = 'none';
+            img.addEventListener('error', () => {
+              const span = document.createElement('span');
+              span.className = `piece piece-${piece.color}`;
+              span.textContent = pieceToGlyph(piece);
+              const coordsEl = div.querySelector('.coords');
+              if (coordsEl) div.insertBefore(span, coordsEl);
+              else div.appendChild(span);
+              img.remove();
+            });
+            div.appendChild(img);
+          }
+        }
+
+        const coords = document.createElement("div");
+        coords.className = "coords";
+        coords.textContent = s.toLowerCase();
+        div.appendChild(coords);
+
+        div.addEventListener("click", () => onSquareClick(s));
+        boardEl.appendChild(div);
+      }
     }
   }
   statusEl.textContent = `Mode: ${mode} | Turn: ${state.turn === 'w' ? 'White' : 'Black'} | Move: ${state.moveNumber}`;
@@ -814,6 +953,24 @@ resetBtn.addEventListener("click", () => {
   // clear last-move highlight on reset
   lastMove = null;
   render();
+});
+
+// Flip button and keyboard shortcut (F)
+function toggleFlip() {
+  boardFlipped = !boardFlipped;
+  try { localStorage.setItem('boardFlipped', boardFlipped ? 'true' : 'false'); } catch (e) {}
+  render();
+}
+if (flipBtn) flipBtn.addEventListener('click', toggleFlip);
+document.addEventListener('keydown', (e) => {
+  if (!e || !e.key) return;
+  // ignore typing into inputs
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.ctrlKey || e.metaKey) return;
+  if (e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    toggleFlip();
+  }
 });
 
 // initial UI setup: show/hide correct controls
