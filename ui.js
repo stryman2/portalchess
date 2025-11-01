@@ -221,6 +221,68 @@ let onlineColor = null; // 'w' or 'b'
 let isHost = false;
 let onlinePanel = null;
 
+// AI scheduling timer (so we can cancel pending think work if mode changes)
+let aiTimer = null;
+
+function clearAiTimer() {
+  if (aiTimer) {
+    clearTimeout(aiTimer);
+    aiTimer = null;
+  }
+}
+
+function scheduleAiTurn(delay = 40) {
+  clearAiTimer();
+  aiTimer = setTimeout(() => {
+    aiTimer = null;
+    // Re-check mode and turn right before thinking to avoid wasting CPU
+    if (mode !== 'vs-ai') return;
+    if (state.turn !== aiColor) return;
+    try {
+      const aiMove = getBestMove(state, aiDepth, aiColor);
+      if (aiMove) {
+        state = applyResolvedMove(state, aiMove);
+        try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
+        try { playSoundForResolved(aiMove, state); } catch (e) {}
+        suggestion = null;
+        render();
+      } else {
+        render();
+      }
+    } catch (err) {
+      console.error('AI error:', err);
+      render();
+    }
+  }, delay);
+}
+
+// Keep-alive pinger to prevent free Render web services from spinning down.
+// Client-side only: pings the server root every 10 minutes while in an online game.
+let keepAliveTimer = null;
+const KEEP_ALIVE_MS = 10 * 60 * 1000; // 10 minutes
+function serverRootUrl() {
+  // Match connectSocket logic: use localhost in dev, otherwise production Render URL
+  return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000/'
+    : 'https://portalchess.onrender.com/';
+}
+function pingServerOnce() {
+  try {
+    const url = serverRootUrl();
+    // Use no-cors to avoid CORS preflight when client hosted on other origin.
+    fetch(url, { method: 'GET', cache: 'no-store', mode: 'no-cors' }).catch(() => {});
+  } catch (e) {}
+}
+function startKeepAlive() {
+  stopKeepAlive();
+  // Immediately ping once, then schedule interval
+  pingServerOnce();
+  keepAliveTimer = setInterval(() => pingServerOnce(), KEEP_ALIVE_MS);
+}
+function stopKeepAlive() {
+  if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+
 // Rehydrate server-sent state to the client's expected shapes (Sets for portals)
 function hydrateState(srvState) {
   if (!srvState) return srvState;
@@ -709,24 +771,7 @@ function applyChosenMove(chosen) {
 
   // After human move: schedule AI if needed
   if (mode === "vs-ai" && state.turn === aiColor) {
-    setTimeout(() => {
-      try {
-        const aiMove = getBestMove(state, aiDepth, aiColor);
-        if (aiMove) {
-          state = applyResolvedMove(state, aiMove);
-            // record and play sound for AI move
-            try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
-            try { playSoundForResolved(aiMove, state); } catch (e) {}
-          suggestion = null;
-          render();
-        } else {
-          render();
-        }
-      } catch (err) {
-        console.error("AI error:", err);
-        render();
-      }
-    }, 40);
+    scheduleAiTurn(40);
   }
 }
 
@@ -860,16 +905,11 @@ modeSelect.addEventListener("change", e => {
   applySuggestionBtn.style.display = (mode === "analyze") ? "inline-block" : "none";
   // If switching to vs-ai and it's AI to move, trigger AI
   if (mode === "vs-ai" && state.turn === aiColor) {
-    setTimeout(() => {
-      const aiMove = getBestMove(state, aiDepth, aiColor);
-      if (aiMove) {
-        state = applyResolvedMove(state, aiMove);
-        try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
-        try { playSoundForResolved(aiMove, state); } catch (e) {}
-        render();
-      }
-    }, 40);
+    scheduleAiTurn(40);
   }
+
+  // If we switched away from vs-ai, cancel any pending AI work
+  if (mode !== 'vs-ai') clearAiTimer();
 
   // If switching to online, connect and either create or join a room based on URL
   if (mode === 'online') {
@@ -883,6 +923,8 @@ modeSelect.addEventListener("change", e => {
       createRoomOnServer();
     }
   }
+  // If we switched away from online mode, stop keep-alive pings
+  if (mode !== 'online') stopKeepAlive();
   render();
 });
 
@@ -952,6 +994,10 @@ resetBtn.addEventListener("click", () => {
   selectedSq = null; legalTargets.clear(); suggestion = null;
   // clear last-move highlight on reset
   lastMove = null;
+  // cancel any pending AI work when resetting
+  clearAiTimer();
+  // stop keep-alive pings when resetting
+  stopKeepAlive();
   render();
 });
 
@@ -1037,6 +1083,7 @@ function connectSocket() {
   socket = io(SERVER_URL);
 
   socket.on('connect', () => { console.log('connected to server', socket.id); });
+  // keep-alive will start when the server signals the game has started
 
   socket.on('gameStart', ({ roomId, color, state: serverState }) => {
     onlineRoomId = roomId;
@@ -1045,6 +1092,8 @@ function connectSocket() {
     try { state = hydrateState(serverState); } catch (e) { state = serverState; }
     showOnlinePanel(`Room: ${roomId} — You are ${color === 'w' ? 'White' : 'Black'}`, window.location.origin + '/play/' + roomId);
     render();
+    // start keep-alive pings while this game is active (prevents Render free service spin-down)
+    startKeepAlive();
   });
 
   socket.on('moveMade', ({ resolved, state: serverState }) => {
@@ -1053,11 +1102,17 @@ function connectSocket() {
     render();
   });
 
+  socket.on('playerLeft', ({ socketId } = {}) => {
+    // stop keep-alive when a player leaves (room no longer active)
+    stopKeepAlive();
+    console.log('playerLeft', socketId);
+  });
+
   socket.on('moveRejected', (data) => {
     alert('Move rejected by server');
   });
 
-  socket.on('disconnect', () => { console.log('socket disconnected'); socket = null; onlineRoomId = null; onlineColor = null; hideOnlinePanel(); });
+  socket.on('disconnect', () => { console.log('socket disconnected'); socket = null; onlineRoomId = null; onlineColor = null; hideOnlinePanel(); stopKeepAlive(); });
 
   return socket;
 }

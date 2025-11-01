@@ -858,6 +858,65 @@ export function filterLegalByCheck(state, resolvedMoves) {
   }
   return legal;
 }
+
+// ----- Game end helpers: checkmate / stalemate detection -----
+// Returns true if the given color has no legal moves and their king is in check
+export function isCheckmate(state, color) {
+  try {
+    if (!inCheck(state, color)) return false;
+    // collect legal resolved moves for this color
+    const legal = [];
+    // iterate all squares, generate moves for pieces of `color`
+    for (let i = 0; i < 64; i++) {
+      const p = state.board[i];
+      if (!p || p.color !== color) continue;
+      const from = `${FILES[i % 8]}${RANKS[Math.floor(i / 8)]}`;
+      const base = generatePseudoLegalMoves(state, from);
+      for (const bm of base) {
+        const outcomes = expandWithPortalOutcomes(state, bm);
+        const legalOutcomes = filterLegalByCheck(state, outcomes);
+        if (legalOutcomes && legalOutcomes.length > 0) return false;
+      }
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Returns true if the given color has no legal moves and is NOT in check
+export function isStalemate(state, color) {
+  try {
+    if (inCheck(state, color)) return false;
+    for (let i = 0; i < 64; i++) {
+      const p = state.board[i];
+      if (!p || p.color !== color) continue;
+      const from = `${FILES[i % 8]}${RANKS[Math.floor(i / 8)]}`;
+      const base = generatePseudoLegalMoves(state, from);
+      for (const bm of base) {
+        const outcomes = expandWithPortalOutcomes(state, bm);
+        const legalOutcomes = filterLegalByCheck(state, outcomes);
+        if (legalOutcomes && legalOutcomes.length > 0) return false;
+      }
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Convenience: overall game result. Returns { result: 'ongoing'|'checkmate'|'stalemate', winner: 'w'|'b'|null }
+export function gameResult(state) {
+  // check both sides; if current side to move is checkmated, winner is opponent
+  const whiteCheckmate = isCheckmate(state, 'w');
+  const blackCheckmate = isCheckmate(state, 'b');
+  if (whiteCheckmate) return { result: 'checkmate', winner: 'b' };
+  if (blackCheckmate) return { result: 'checkmate', winner: 'w' };
+  const whiteStale = isStalemate(state, 'w');
+  const blackStale = isStalemate(state, 'b');
+  if (whiteStale || blackStale) return { result: 'stalemate', winner: null };
+  return { result: 'ongoing', winner: null };
+}
 // --- Sample-based audio loader ---
 export const SOUND_FILES = {
   move: '/sounds/move.mp3',
