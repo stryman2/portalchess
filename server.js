@@ -135,6 +135,8 @@ io.on('connection', (socket) => {
       // Server-side game end detection (checkmate / stalemate)
       try {
         const res = gameResult(nextState);
+        // Log the computed result so rendered deployments show the decision
+        console.log(`gameResult for room ${roomId}:`, res);
         if (res && res.result && res.result !== 'ongoing') {
           room.over = true;
           if (res.result === 'checkmate') {

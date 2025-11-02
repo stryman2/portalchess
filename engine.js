@@ -864,17 +864,21 @@ export function filterLegalByCheck(state, resolvedMoves) {
 export function isCheckmate(state, color) {
   try {
     if (!inCheck(state, color)) return false;
-    // collect legal resolved moves for this color
-    const legal = [];
+    // To correctly generate pseudo-legal moves we must evaluate moves in a
+    // state where `turn === color`. Clone the state and set the turn to the
+    // color under test so generatePseudoLegalMoves and filterLegalByCheck
+    // behave as expected.
+    const tmp = typeof structuredClone === 'function' ? structuredClone(state) : JSON.parse(JSON.stringify(state));
+    tmp.turn = color;
     // iterate all squares, generate moves for pieces of `color`
     for (let i = 0; i < 64; i++) {
-      const p = state.board[i];
+      const p = tmp.board[i];
       if (!p || p.color !== color) continue;
       const from = `${FILES[i % 8]}${RANKS[Math.floor(i / 8)]}`;
-      const base = generatePseudoLegalMoves(state, from);
+      const base = generatePseudoLegalMoves(tmp, from);
       for (const bm of base) {
-        const outcomes = expandWithPortalOutcomes(state, bm);
-        const legalOutcomes = filterLegalByCheck(state, outcomes);
+        const outcomes = expandWithPortalOutcomes(tmp, bm);
+        const legalOutcomes = filterLegalByCheck(tmp, outcomes);
         if (legalOutcomes && legalOutcomes.length > 0) return false;
       }
     }
@@ -888,14 +892,18 @@ export function isCheckmate(state, color) {
 export function isStalemate(state, color) {
   try {
     if (inCheck(state, color)) return false;
+    // As with isCheckmate, generatePseudoLegalMoves must be called with a
+    // state whose `turn` equals the color being tested.
+    const tmp = typeof structuredClone === 'function' ? structuredClone(state) : JSON.parse(JSON.stringify(state));
+    tmp.turn = color;
     for (let i = 0; i < 64; i++) {
-      const p = state.board[i];
+      const p = tmp.board[i];
       if (!p || p.color !== color) continue;
       const from = `${FILES[i % 8]}${RANKS[Math.floor(i / 8)]}`;
-      const base = generatePseudoLegalMoves(state, from);
+      const base = generatePseudoLegalMoves(tmp, from);
       for (const bm of base) {
-        const outcomes = expandWithPortalOutcomes(state, bm);
-        const legalOutcomes = filterLegalByCheck(state, outcomes);
+        const outcomes = expandWithPortalOutcomes(tmp, bm);
+        const legalOutcomes = filterLegalByCheck(tmp, outcomes);
         if (legalOutcomes && legalOutcomes.length > 0) return false;
       }
     }
