@@ -1017,7 +1017,7 @@ function showGameEndModal(message) {
     const box = document.createElement('div');
     box.style.background = '#fff'; box.style.padding = '18px'; box.style.borderRadius = '10px'; box.style.minWidth = '260px'; box.style.maxWidth = '90%'; box.style.textAlign = 'center'; box.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
 
-    const h = document.createElement('div'); h.textContent = message; h.style.fontSize = '18px'; h.style.marginBottom = '12px'; h.style.fontWeight = '600'; box.appendChild(h);
+  const h = document.createElement('div'); h.textContent = message || 'Game over.'; h.style.fontSize = '18px'; h.style.marginBottom = '12px'; h.style.fontWeight = '600'; h.style.color = '#000'; box.appendChild(h);
 
     const btn = document.createElement('button'); btn.textContent = 'OK'; btn.style.padding = '8px 14px'; btn.style.borderRadius = '6px'; btn.style.cursor = 'pointer';
     btn.addEventListener('click', () => { try { overlay.remove(); } catch (e) { overlay.parentNode && overlay.parentNode.removeChild(overlay); } });
@@ -1148,7 +1148,10 @@ function connectSocket() {
       stopKeepAlive();
       clearAiTimer();
 
-      // Build message
+      // Debug: log the payload so we can diagnose blank/empty modal issues
+      try { console.log('socket gameEnd payload:', data); } catch (e) {}
+
+      // Build message (defensive: never allow empty string)
       let msg = '';
       if (data && data.result === 'checkmate') {
         const winner = data.winner === 'white' ? 'White' : (data.winner === 'black' ? 'Black' : data.winner);
@@ -1158,11 +1161,12 @@ function connectSocket() {
       } else {
         msg = 'Game over.';
       }
+      if (!msg || String(msg).trim() === '') msg = 'Game over.';
 
       // Show modal
       showGameEndModal(msg);
-      // Update status bar
-      statusEl.textContent = msg;
+      // Update status bar (always set to a readable string)
+      statusEl.textContent = msg || 'Game over.';
     } catch (e) {
       console.warn('gameEnd handler failed', e && e.message);
     }
