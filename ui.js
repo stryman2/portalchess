@@ -206,6 +206,8 @@ let mode = modeSelect.value; // 'hotseat' | 'vs-ai' | 'analyze'
 let aiColor = aiColorSelect.value; // 'w'|'b'
 let aiDepth = parseInt(aiDepthInput.value, 10) || 3;
 let __dev_safety_wrapper_installed = true; // marker
+// When true the board is locked and clicks ignored (used when the server declares game over)
+let gameOver = false;
 
 // Board orientation: false = white at bottom (default), true = flipped (black at bottom)
 let boardFlipped = false;
@@ -780,7 +782,9 @@ function onSquareClick(s) {
   // errors (or other unexpected runtime exceptions) from stopping UI flow
   // while developing in the browser's DevTools. Errors are logged but the
   // handler will return gracefully so the board remains interactive.
-  try {
+    try {
+      // If the game is finished (server declared gameEnd), ignore further clicks
+      if (gameOver) return;
     // If vs-AI and it's AI's turn, ignore clicks
     if (mode === "vs-ai" && state.turn === aiColor) return;
 
@@ -998,8 +1002,34 @@ resetBtn.addEventListener("click", () => {
   clearAiTimer();
   // stop keep-alive pings when resetting
   stopKeepAlive();
+  // clear game-over flag when manually resetting
+  gameOver = false;
   render();
 });
+
+// Show a simple modal overlay for game end messages
+function showGameEndModal(message) {
+  try {
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed'; overlay.style.left = '0'; overlay.style.top = '0'; overlay.style.width = '100%'; overlay.style.height = '100%';
+    overlay.style.background = 'rgba(0,0,0,0.5)'; overlay.style.display = 'flex'; overlay.style.alignItems = 'center'; overlay.style.justifyContent = 'center'; overlay.style.zIndex = '99999';
+
+    const box = document.createElement('div');
+    box.style.background = '#fff'; box.style.padding = '18px'; box.style.borderRadius = '10px'; box.style.minWidth = '260px'; box.style.maxWidth = '90%'; box.style.textAlign = 'center'; box.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
+
+    const h = document.createElement('div'); h.textContent = message; h.style.fontSize = '18px'; h.style.marginBottom = '12px'; h.style.fontWeight = '600'; box.appendChild(h);
+
+    const btn = document.createElement('button'); btn.textContent = 'OK'; btn.style.padding = '8px 14px'; btn.style.borderRadius = '6px'; btn.style.cursor = 'pointer';
+    btn.addEventListener('click', () => { try { overlay.remove(); } catch (e) { overlay.parentNode && overlay.parentNode.removeChild(overlay); } });
+    box.appendChild(btn);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  } catch (e) {
+    // ignore modal errors
+    alert(message);
+  }
+}
 
 // Flip button and keyboard shortcut (F)
 function toggleFlip() {
@@ -1090,6 +1120,8 @@ function connectSocket() {
     onlineColor = color;
     // adopt server state and render
     try { state = hydrateState(serverState); } catch (e) { state = serverState; }
+    // reset any previous game-over flag when a new game starts
+    gameOver = false;
     showOnlinePanel(`Room: ${roomId} — You are ${color === 'w' ? 'White' : 'Black'}`, window.location.origin + '/play/' + roomId);
     render();
     // start keep-alive pings while this game is active (prevents Render free service spin-down)
@@ -1106,6 +1138,34 @@ function connectSocket() {
     // stop keep-alive when a player leaves (room no longer active)
     stopKeepAlive();
     console.log('playerLeft', socketId);
+  });
+
+  // Server-declared game end (checkmate / stalemate)
+  socket.on('gameEnd', (data) => {
+    try {
+      // Lock the board and cancel timers/pings
+      gameOver = true;
+      stopKeepAlive();
+      clearAiTimer();
+
+      // Build message
+      let msg = '';
+      if (data && data.result === 'checkmate') {
+        const winner = data.winner === 'white' ? 'White' : (data.winner === 'black' ? 'Black' : data.winner);
+        msg = `Checkmate! ${winner} wins.`;
+      } else if (data && data.result === 'stalemate') {
+        msg = 'Stalemate! The game is a draw.';
+      } else {
+        msg = 'Game over.';
+      }
+
+      // Show modal
+      showGameEndModal(msg);
+      // Update status bar
+      statusEl.textContent = msg;
+    } catch (e) {
+      console.warn('gameEnd handler failed', e && e.message);
+    }
   });
 
   socket.on('moveRejected', (data) => {

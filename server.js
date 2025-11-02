@@ -6,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Import engine functions from the project so the server is authoritative
-import { initialState, generatePseudoLegalMoves, expandWithPortalOutcomes, filterLegalByCheck, applyResolvedMove } from './engine.js';
+import { initialState, generatePseudoLegalMoves, expandWithPortalOutcomes, filterLegalByCheck, applyResolvedMove, gameResult } from './engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,7 +51,8 @@ io.on('connection', (socket) => {
 
   socket.on('createRoom', (cb) => {
     const roomId = makeRoomId(5);
-    const room = { sockets: new Set([socket.id]), state: initialState(), locked: false, host: socket.id };
+    // room.over indicates the game has finished (checkmate/stalemate) and prevents further moves
+    const room = { sockets: new Set([socket.id]), state: initialState(), locked: false, host: socket.id, over: false };
     rooms.set(roomId, room);
     socket.join(roomId);
     console.log(`Room ${roomId} created by ${socket.id}`);
@@ -90,7 +91,8 @@ io.on('connection', (socket) => {
       if (!roomId || !resolved) return cb && cb({ error: 'invalid-payload' });
       const room = rooms.get(roomId);
       if (!room) return cb && cb({ error: 'not-found' });
-      if (!room.locked) return cb && cb({ error: 'not-ready' });
+  if (!room.locked) return cb && cb({ error: 'not-ready' });
+  if (room.over) return cb && cb({ error: 'game-over' });
 
       // Validate that it's this player's turn. We don't track which socket is which color
       // beyond the initial assignment, so for simplicity accept moves and validate via state.turn.
@@ -129,6 +131,22 @@ io.on('connection', (socket) => {
 
       // Broadcast to room
       io.to(roomId).emit('moveMade', { resolved: chosen, state: nextState });
+
+      // Server-side game end detection (checkmate / stalemate)
+      try {
+        const res = gameResult(nextState);
+        if (res && res.result && res.result !== 'ongoing') {
+          room.over = true;
+          if (res.result === 'checkmate') {
+            const winner = res.winner === 'w' ? 'white' : (res.winner === 'b' ? 'black' : null);
+            io.to(roomId).emit('gameEnd', { result: 'checkmate', winner });
+          } else if (res.result === 'stalemate') {
+            io.to(roomId).emit('gameEnd', { result: 'stalemate' });
+          }
+        }
+      } catch (e) {
+        console.warn('game end detection failed', e && e.message);
+      }
       return cb && cb({ ok: true });
     } catch (err) {
       console.error('makeMove error', err);
