@@ -18,6 +18,12 @@ const io = new Server(server);
 // Serve static frontend files from project root
 app.use(express.static(path.join(__dirname)));
 
+// Serve images directory explicitly at /images so requests like
+// GET /images/foo.png map to <project root>/images/foo.png
+// This avoids any ambiguity with SPA fallbacks and ensures a clear
+// mount point for image assets.
+app.use('/images', express.static(path.join(__dirname, 'images')));
+
 // Fallback to index.html for SPA/room deep links like /play/:id
 // But only return index.html for requests that accept HTML. This prevents
 // the catch-all from responding to requests for actual static assets
@@ -39,7 +45,8 @@ app.get('*', (req, res) => {
   }
 });
 
-// Simple in-memory rooms store. { roomId: { sockets: Set, state, locked, hostSocketId } }
+// Simple in-memory rooms store. Each room holds game state and clock info.
+// { roomId: { sockets: Set, state, locked, host, over, clock: {w,b}, lastTick, clockInterval } }
 const rooms = new Map();
 
 function makeRoomId(len = 5) {
@@ -49,14 +56,26 @@ function makeRoomId(len = 5) {
 io.on('connection', (socket) => {
   console.log('socket connected', socket.id);
 
-  socket.on('createRoom', (cb) => {
+  socket.on('createRoom', (payload, cb) => {
+    // Support optional payload: createRoom({ timeMinutes: 5 }, cb)
+    let timeMinutes = 10; // default
+    let callback = cb;
+    // If payload is actually the callback (legacy signature createRoom(cb))
+    if (typeof payload === 'function') {
+      callback = payload;
+    } else if (payload && payload.timeMinutes) {
+      const pm = parseInt(payload.timeMinutes, 10);
+      if (Number.isFinite(pm) && pm > 0) timeMinutes = pm;
+    }
+
     const roomId = makeRoomId(5);
-    // room.over indicates the game has finished (checkmate/stalemate) and prevents further moves
-    const room = { sockets: new Set([socket.id]), state: initialState(), locked: false, host: socket.id, over: false };
+    // room.over indicates the game has finished (checkmate/stalemate/timeout) and prevents further moves
+    const timeMs = Math.max(1, timeMinutes) * 60 * 1000;
+    const room = { sockets: new Set([socket.id]), state: initialState(), locked: false, host: socket.id, over: false, clock: { w: timeMs, b: timeMs }, lastTick: Date.now(), clockInterval: null };
     rooms.set(roomId, room);
     socket.join(roomId);
     console.log(`Room ${roomId} created by ${socket.id}`);
-    if (typeof cb === 'function') cb({ roomId });
+    if (typeof callback === 'function') callback({ roomId });
   });
 
   socket.on('joinRoom', (data, cb) => {
@@ -75,8 +94,10 @@ io.on('connection', (socket) => {
       const whiteId = room.host || ids[0];
       const blackId = ids.find(id => id !== whiteId) || ids[1];
       // send gameStart to both players with assigned color and initial state
-      io.to(whiteId).emit('gameStart', { roomId, color: 'w', state: room.state });
-      io.to(blackId).emit('gameStart', { roomId, color: 'b', state: room.state });
+      io.to(whiteId).emit('gameStart', { roomId, color: 'w', state: room.state, clocks: room.clock });
+      io.to(blackId).emit('gameStart', { roomId, color: 'b', state: room.state, clocks: room.clock });
+      // Start the server-side ticking loop for the room clock
+      startRoomClock(roomId);
       console.log(`Room ${roomId} locked: ${whiteId}=w, ${blackId}=b`);
     } else {
       // notify joined but waiting
@@ -84,6 +105,48 @@ io.on('connection', (socket) => {
     }
     if (typeof cb === 'function') cb({ ok: true });
   });
+
+  function startRoomClock(roomId) {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (room.clockInterval) return; // already running
+    room.lastTick = Date.now();
+    room.clockInterval = setInterval(() => {
+      try {
+        tickRoomClock(roomId);
+      } catch (e) { console.error('room clock tick error', e && e.message); }
+    }, 250);
+  }
+
+  function stopRoomClock(roomId) {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (room.clockInterval) {
+      clearInterval(room.clockInterval);
+      room.clockInterval = null;
+    }
+  }
+
+  function tickRoomClock(roomId) {
+    const room = rooms.get(roomId);
+    if (!room || room.over || !room.locked) return;
+    const now = Date.now();
+    const delta = now - (room.lastTick || now);
+    room.lastTick = now;
+    const turn = room.state && room.state.turn ? room.state.turn : 'w';
+    if (!room.clock || typeof room.clock[turn] !== 'number') return;
+    room.clock[turn] = Math.max(0, room.clock[turn] - delta);
+    // Broadcast clock snapshot to clients for sync
+    io.to(roomId).emit('clock', { clocks: { w: room.clock.w, b: room.clock.b }, turn, ts: now });
+    // Timeout detection
+    if (room.clock[turn] <= 0) {
+      // current player timed out -> other player wins
+      room.over = true;
+      stopRoomClock(roomId);
+      const winner = turn === 'w' ? 'black' : 'white';
+      io.to(roomId).emit('gameEnd', { result: 'timeout', winner });
+    }
+  }
 
   socket.on('makeMove', async (data, cb) => {
     try {
@@ -124,13 +187,20 @@ io.on('connection', (socket) => {
         return cb && cb({ error: 'illegal-move' });
       }
 
-      // Accept the first matching outcome and apply
-      const chosen = matches[0];
-      const nextState = applyResolvedMove(room.state, chosen);
-      room.state = nextState;
+  // Before applying the move, advance the room clock to account for elapsed
+  try { tickRoomClock(roomId); } catch (e) { /* ignore tick errors */ }
 
-      // Broadcast to room
-      io.to(roomId).emit('moveMade', { resolved: chosen, state: nextState });
+  // Accept the first matching outcome and apply
+  const chosen = matches[0];
+  const nextState = applyResolvedMove(room.state, chosen);
+  room.state = nextState;
+  // reset lastTick so server starts timing the next player from now
+  room.lastTick = Date.now();
+
+  // Broadcast to room (include latest clocks so clients can re-sync immediately)
+  io.to(roomId).emit('moveMade', { resolved: chosen, state: nextState, clocks: room.clock });
+  // Also emit an immediate clock snapshot
+  io.to(roomId).emit('clock', { clocks: { w: room.clock.w, b: room.clock.b }, turn: room.state.turn, ts: room.lastTick });
 
       // Server-side game end detection (checkmate / stalemate)
       try {
@@ -139,6 +209,8 @@ io.on('connection', (socket) => {
         console.log(`gameResult for room ${roomId}:`, res);
         if (res && res.result && res.result !== 'ongoing') {
           room.over = true;
+          // stop clock ticking for this room
+          stopRoomClock(roomId);
           if (res.result === 'checkmate') {
             const winner = res.winner === 'w' ? 'white' : (res.winner === 'b' ? 'black' : null);
             io.to(roomId).emit('gameEnd', { result: 'checkmate', winner });
@@ -165,8 +237,10 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('playerLeft', { socketId: socket.id });
         // If room is empty, delete it
         if (room.sockets.size === 0) {
-          rooms.delete(roomId);
-          console.log(`Room ${roomId} removed (empty)`);
+            // clear any running clock interval
+            if (room.clockInterval) clearInterval(room.clockInterval);
+            rooms.delete(roomId);
+            console.log(`Room ${roomId} removed (empty)`);
         } else {
           // unlock room if someone leaves so a new player can join
           room.locked = false;

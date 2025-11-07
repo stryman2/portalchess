@@ -34,8 +34,10 @@ const WEIGHTS = {
 const CENTER_SQS = new Set(["D4","D5","E4","E5"]);
 
 // Performance tuning knobs (change to taste)
-export const MAX_MOVES_PER_NODE = 24;    // beam width (best candidates per node)
-export const MAX_SWAP_SCAN_IN_EVAL = 12; // how many legal moves to consider when searching for swap opportunities in evaluateState
+// Lower defaults for faster bulk simulation runs. These can be tuned upward
+// for stronger single-game play. Reducing these reduces branching and eval cost.
+export const MAX_MOVES_PER_NODE = 12;    // beam width (best candidates per node)
+export const MAX_SWAP_SCAN_IN_EVAL = 4; // how many legal moves to consider when searching for swap opportunities in evaluateState
 
 // Robust portal presence helper used by evaluation (works with engine state)
 function portalHas(state, sq) {
@@ -149,7 +151,32 @@ function evaluateState(state, color) {
 }
 
 // Minimax + alpha-beta with beam limiting (MAX_MOVES_PER_NODE applied at each node)
+// Transposition cache: Map from key (posKey + ':' + depth) -> { value, move }
+const tt = new Map();
+
+// Lightweight position key: 64-char board string (piece letter upper=white lower=black or '.'), plus turn
+function positionKey(state) {
+  let out = '';
+  for (let i = 0; i < 64; i++) {
+    const p = state.board[i];
+    if (!p) out += '.';
+    else {
+      const ch = p.type || '?';
+      out += (p.color === 'w') ? ch.toUpperCase() : ch.toLowerCase();
+    }
+  }
+  out += '|' + (state.turn || 'w');
+  return out;
+}
+
 function minimax(state, depth, alpha, beta, maximizingPlayerColor, currentPlayerColor) {
+  // Transposition table lookup
+  const key = positionKey(state) + ':' + depth + ':' + maximizingPlayerColor;
+  const cached = tt.get(key);
+  if (cached) {
+    return { value: cached.value, move: cached.move };
+  }
+
   if (depth === 0) {
     return { value: evaluateState(state, maximizingPlayerColor), move: null };
   }
@@ -161,8 +188,10 @@ function minimax(state, depth, alpha, beta, maximizingPlayerColor, currentPlayer
     // no legal moves -> mate or stalemate
     if (inCheck(state, currentPlayerColor)) {
       const mateValue = currentPlayerColor === maximizingPlayerColor ? -1e6 : 1e6;
+      tt.set(key, { value: mateValue, move: null });
       return { value: mateValue, move: null };
     }
+    tt.set(key, { value: 0, move: null });
     return { value: 0, move: null }; // stalemate
   }
 
@@ -178,6 +207,7 @@ function minimax(state, depth, alpha, beta, maximizingPlayerColor, currentPlayer
       alpha = Math.max(alpha, res.value);
       if (beta <= alpha) break;
     }
+    tt.set(key, { value: maxEval, move: bestMove });
     return { value: maxEval, move: bestMove };
   } else {
     let minEval = Infinity;
@@ -188,13 +218,23 @@ function minimax(state, depth, alpha, beta, maximizingPlayerColor, currentPlayer
       beta = Math.min(beta, res.value);
       if (beta <= alpha) break;
     }
+    tt.set(key, { value: minEval, move: bestMove });
     return { value: minEval, move: bestMove };
   }
 }
 
 // Public API
+// Do NOT clear the transposition table here — clearing per top-level search
+// prevents reuse across successive moves and is a major performance hit
+// during simulations. Instead, allow callers to clear the table when they
+// want (e.g. at the start of a game). This preserves safety while enabling
+// large speedups.
 export function getBestMove(state, depth = 3, color = 'b') {
-  // If depth is small, this will be fast. For larger depth, prefer a web worker.
   const res = minimax(state, depth, -Infinity, Infinity, color, color);
   return res.move;
+}
+
+// Caller-visible helper to clear the transposition table when appropriate.
+export function clearTranspositionTable() {
+  tt.clear();
 }

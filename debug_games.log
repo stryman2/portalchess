@@ -1,0 +1,18 @@
+Debug games log
+Generated: 2025-11-03T08:21:33.253Z
+
+--- Game 2 DEBUG: suspicious-checkmate (2025-11-03T10:09:18.110Z)
+Final result: {"result":"checkmate","winner":"b"}
+Last move: C8->G4 (captured=wQ)
+Board (top->bottom):
+bR bN  . bK  . bB bN bR
+bP bP  .  .  .  .  . bP
+.  .  .  .  . bP  .  .
+. bB  . wP  .  .  .  .
+.  .  . bP bP wK bQ  .
+. wN  .  .  .  .  .  .
+wP  .  .  .  . wP wP wP
+wR  .  .  .  . wB wN wR
+Legal moves for side to move:
+(none)
+

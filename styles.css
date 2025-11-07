@@ -1,9 +1,12 @@
+/*
+  זהו קובץ ה-CSS המלא והנקי שלך (V5).
+  הסרתי את כל כללי הפורטל הכפולים והישנים
+  והחלפתי אותם בכלל הנקי (V5) לטעינת תמונות
+  עם z-index: 2 נכון.
+*/
 :root {
   --light: #eeeeee;
   --dark: #7085B6;
-
-  /* portal fill opacity: change this value to tweak portal transparency globally */
-  --portal-fill-alpha: 0;
 
   --portal-white: #85c5ff; /* white-exclusive portals */
   --portal-black: #c8a0ff; /* black-exclusive portals */
@@ -49,185 +52,127 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
 }
 .square.light { background: var(--light); }
 .square.dark { background: var(--dark); }
-.square.portal-white, .square.portal-black, .square.portal-neutral {
-  /* keep positioning context for portal pseudo-elements */
-  position: relative; overflow: visible;
+
+/* expose a square-local variable for the canonical background color */
+.square.light { --square-bg: var(--light); }
+.square.dark  { --square-bg: var(--dark); }
+
+/* ===================================================================
+  עיצוב פורטלים נקי (V5) - פותר בעיית שכבות (z-index)
+=================================================================== */
+
+/*
+  כלל בסיס שנדרש עבור ה-::before
+*/
+.portal-white,
+.portal-black,
+.portal-neutral {
+    position: relative;
 }
 
-/* Frame glow for portal squares (distinct per type) */
-.square.portal-white {
-  box-shadow: 0 0 12px 4px rgba(0,150,255,0.65);
-  animation: portalFramePulse 3s ease-in-out infinite;
-}
-.square.portal-black {
-  box-shadow: 0 0 12px 4px rgba(150,50,255,0.65);
-  animation: portalFramePulse 3s ease-in-out infinite;
-}
-.square.portal-white {
-  --stroke-color: #48abe0;
-  --glow-color: rgba(72,171,224,0.65);
-  animation: portalFramePulse 3s ease-in-out infinite;
-  /* paint the square background to the requested color but with tweakable opacity */
-  background: rgba(72,171,224,var(--portal-fill-alpha));
-  color: #fff; /* keep any fallback glyphs visible */
-  box-shadow: 0 0 0 2px var(--stroke-color), 0 0 14px 6px var(--glow-color);
-}
-.square.portal-black {
-  --stroke-color: #8a2be2;
-  --glow-color: rgba(138,43,226,0.65);
-  animation: portalFramePulse 3s ease-in-out infinite;
-  background: rgba(138,43,226,var(--portal-fill-alpha));
-  color: #fff;
-  box-shadow: 0 0 0 2px var(--stroke-color), 0 0 16px 8px var(--glow-color);
-}
-.square.portal-neutral {
-  --stroke-color: #56633a; /* neutral fill color per your latest request */
-  --glow-color: rgba(160,165,148,0.45);
-  animation: portalFramePulse 3s ease-in-out infinite;
-  background: rgba(160,165,148,var(--portal-fill-alpha));
-  color: #000;
-  box-shadow: 0 0 0 2px var(--stroke-color), 0 0 12px 5px var(--glow-color);
+/*
+  יצירת שכבת התמונה
+*/
+.portal-white::before,
+.portal-black::before,
+.portal-neutral::before {
+    content: '';
+    position: absolute;
+    inset: 0; /* מכסה את כל המשבצת */
+    
+    /* הגדרות התמונה */
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 100%; /* גודל התמונה */
+    
+    /* שקיפות (סימן מים) */
+    opacity: 1; /* אפשר לשחק עם זה (למשל 0.3) */
+    
+    /* פתרון הבעיה: מיקום בשכבה הנכונה */
+    z-index: 2; /* מעל last-move (1), מתחת לנקודות (5) ולכלי (6) */
+    
+    pointer-events: none; /* שהתמונה לא תפריע ללחיצות */
 }
 
-.square.portal-white::before,
-.square.portal-black::before,
-.square.portal-neutral::before {
-  content: "";
-  position: absolute;
-  inset: 6px;
-  border-radius: 12px;
-  pointer-events: none;
-  filter: blur(6px) saturate(120%);
-  mix-blend-mode: multiply; /* helps the aura feel luminous while keeping square colors */
-  z-index: 0;
-  transform-origin: 50% 50%;
-  animation: portalPulse 2.6s ease-in-out infinite;
+/*
+  טעינת התמונות הנכונות
+*/
+.portal-white::before {
+    background-image: url('/images/portal_white.png');
 }
 
-.square.portal-white::before {
-  background: radial-gradient(circle at 100% 80%, rgba(133,197,255,0.92) 100%, rgba(255,223,140,0.28) 100%, rgba(133,197,255,0.06) 70%, transparent 100%);
-}
-.square.portal-black::before {
-  background: radial-gradient(circle at 50% 40%, rgba(200,160,255,0.92) 100%, rgba(90,40,120,0.28) 30%, rgba(60,20,90,0.06) 55%, transparent 70%);
-  mix-blend-mode: multiply; /* darker, shadowy effect */
-}
-.square.portal-neutral::before {
-  background: radial-gradient(circle at 50% 50%, rgba(196, 197, 176, 0.9) 100%, rgba(180,150,110,0.28) 30%, rgba(200,200,190,0.06) 55%, transparent 70px);
-  mix-blend-mode: multiply;
+.portal-black::before {
+    background-image: url('/images/portal_black.png');
 }
 
-/* subtle moving shimmer overlay */
-.square.portal-white::after,
-.square.portal-black::after,
-.square.portal-neutral::after {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  border-radius: 14px;
-  pointer-events: none;
-  z-index: 1;
-  background: linear-gradient(120deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 20%, rgba(0,0,0,0) 45%, rgba(255,255,255,0.02) 80%, rgba(255,255,255,0.06) 100%);
-  mix-blend-mode: screen;
-  transform: translateX(-15%);
-  animation: portalShimmer 3.6s linear infinite;
+.portal-neutral::before {
+    background-image: url('/images/portal_neutral.png');
 }
+/* --- סוף העיצוב החדש של הפורטלים --- */
 
-/* Color-tint the shimmer so each portal reads distinctly (uses very low opacity tints) */
-.square.portal-white::after { background-image: linear-gradient(120deg, rgba(133,197,255,0.12) 0%, rgba(255,223,140,0.06) 30%, rgba(133,197,255,0.02) 100%); }
-.square.portal-black::after { background-image: linear-gradient(120deg, rgba(180,140,220,0.12) 0%, rgba(60,20,90,0.06) 30%, rgba(180,140,220,0.02) 100%); mix-blend-mode: multiply; }
-.square.portal-neutral::after { background-image: linear-gradient(120deg, rgba(210,210,210,0.12) 0%, rgba(180,150,110,0.06) 30%, rgba(210,210,210,0.02) 100%); mix-blend-mode: overlay; }
 
-@keyframes portalPulse {
-  0% { transform: scale(0.98); opacity: 0.9; }
-  50% { transform: scale(1.06); opacity: 1; }
-  100% { transform: scale(0.98); opacity: 0.9; }
-}
-
-@keyframes portalShimmer {
-  0% { transform: translateX(-25%); opacity: 0.85; }
-  50% { transform: translateX(10%); opacity: 1; }
-  100% { transform: translateX(-25%); opacity: 0.85; }
-}
-
-@keyframes portalFramePulse {
-  0% { box-shadow: 0 0 10px 2px rgba(0,0,0,0.0); }
-  40% { box-shadow: 0 0 18px 6px rgba(0,0,0,0.0); }
-  50% { box-shadow: 0 0 22px 8px rgba(0,0,0,0.0); }
-  100% { box-shadow: 0 0 10px 2px rgba(0,0,0,0.0); }
-}
-
-/* --- Heavier magical portal visuals (ring + animated sparks) --- */
-.portal-visual {
-  position: absolute;
-  inset: 6px;
-  border-radius: 12px;
-  pointer-events: none;
-  z-index: 0;
-  display: block;
-  transform-style: preserve-3d;
-}
-.portal-visual::before {
-  /* bright energetic ring */
-  content: '';
-  position: absolute;
-  inset: 8px;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg at 50% 50%, rgba(255,255,255,0.9), transparent 20%);
-  filter: blur(6px) saturate(160%);
-  mix-blend-mode: screen;
-  transform: translateZ(0) scale(1);
-  box-shadow: 0 0 18px rgba(255,255,255,0.18), 0 0 40px rgba(255,255,255,0.06) inset;
-  animation: ringSpin 4s linear infinite;
-}
-.portal-visual.portal-white::before {
-  background: radial-gradient(circle at 50% 50%, rgba(200,240,255,0.95) 0%, rgba(133,197,255,0.9) 10%, rgba(133,197,255,0.06) 35%, transparent 45%);
-  box-shadow: 0 0 26px rgba(133,197,255,0.35), 0 0 60px rgba(180,220,255,0.12) inset;
-}
-.portal-visual.portal-black::before {
-  background: radial-gradient(circle at 50% 50%, rgba(240,220,255,0.95) 0%, rgba(180,140,220,0.9) 10%, rgba(60,20,90,0.08) 35%, transparent 45%);
-  mix-blend-mode: screen;
-  box-shadow: 0 0 28px rgba(180,140,220,0.25), 0 0 66px rgba(70,30,120,0.08) inset;
-}
-.portal-visual.portal-neutral::before {
-  background: radial-gradient(circle at 50% 50%, rgba(245,245,245,0.88) 0%, rgba(220,200,170,0.8) 12%, rgba(200,180,160,0.06) 35%, transparent 45%);
-  box-shadow: 0 0 22px rgba(220,200,170,0.18), 0 0 48px rgba(200,180,160,0.06) inset;
-  mix-blend-mode: overlay;
-}
-
-.portal-visual i {
-  position: absolute; left: 50%; top: 50%;
-  width: 6px; height: 2px; border-radius: 2px;
-  transform-origin: 0 50%;
-  background: linear-gradient(90deg, rgba(255,255,255,0.98), rgba(255,255,255,0.2));
-  box-shadow: 0 0 8px rgba(255,255,255,0.8);
-  opacity: 0.95;
-  transform: rotate(var(--angle)) translate(var(--dist)) rotate(var(--angle));
-  animation: sparkSpin 2.6s linear infinite;
-  animation-delay: var(--delay);
-}
-.portal-visual.portal-white i { background: linear-gradient(90deg, rgba(200,245,255,0.98), rgba(120,200,255,0.3)); box-shadow: 0 0 8px rgba(120,200,255,0.9); }
-.portal-visual.portal-black i { background: linear-gradient(90deg, rgba(220,180,255,0.98), rgba(140,100,220,0.3)); box-shadow: 0 0 10px rgba(140,100,220,0.9); }
-.portal-visual.portal-neutral i { background: linear-gradient(90deg, rgba(240,240,240,0.98), rgba(210,180,140,0.3)); box-shadow: 0 0 8px rgba(210,180,140,0.9); }
-
-@keyframes ringSpin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-@keyframes sparkSpin { 0% { transform: rotate(var(--angle)) translate(var(--dist)) rotate(var(--angle)) scaleX(1); opacity: 0.8; }
-  50% { transform: rotate(calc(var(--angle) + 180deg)) translate(var(--dist)) rotate(calc(var(--angle) + 180deg)) scaleX(0.6); opacity: 1; }
-  100% { transform: rotate(calc(var(--angle) + 360deg)) translate(var(--dist)) rotate(calc(var(--angle) + 360deg)) scaleX(1); opacity: 0.8; }
-}
+/* ===================================================================
+  מכאן ממשיך שאר הקוד המקורי שלך, ללא שינוי
+ ===================================================================
+*/
 
 /* Ensure pieces render above portal visuals */
-.piece { position: relative; z-index: 3; }
-.coords { position: absolute; z-index: 4; }
-.square.highlight { outline: 3px solid var(--highlight); }
-.coords {
-  position: absolute; font-size: 10px; color: #000a; left: 2px; bottom: 2px;
+/* .piece { position: relative; z-index: 3; } -> נמחק, הוחלף בכלל החדש למטה */
+/* .coords { position: absolute; z-index: 4; } -> נמחק, הוחלף בכלל החדש למטה */
+.square.highlight { outline: none; }
+/* Selected square (origin) — visible border so user knows which piece is selected */
+.square.selected { outline: 3px solid var(--highlight); border-radius: 4px; }
+
+/* Available move target: simple centered pseudo-element dot.
+  We intentionally use a ::after pseudo-element so the square's original
+  background (including portal fills) is not overridden and no DOM nodes
+  are required. This is compact, performant, and avoids visual bleed. */
+.square.move-target::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%); /* דורס את ה-translateX של הריחוף */
+  animation: none;                  /* מבטל את כל האנימציות */
+  mix-blend-mode: normal;           /* מבטל את ערבוב הצבעים המוזר */ 
+  width: 25%;
+  height: 25%;
+  border-radius: 50%;
+  background: rgba(0, 183, 255, 0.4);
+  pointer-events: none;
+  z-index: 5; /* מעל הפורטלים (2) ומתחת לכלי (6) */
 }
+.coords { position: absolute; font-size: 12px; z-index: 8; pointer-events: none; }
+
+/* File letters that appear on the bottom-most rank (a-h) */
+.coords.file-label {
+  left: 10%;
+  bottom: 2px;
+  transform: translateX(-50%);
+  font-weight: 600;
+  font-size: calc(var(--board-size) / 38);
+}
+.square.light .coords.file-label { color: rgba(0,0,0,0.65); }
+.square.dark  .coords.file-label { color: rgba(255,255,255,0.85); }
+
+/* Rank numbers that appear on the right-most file (1-8) */
+.coords.rank-label {
+  right: 4px;
+  bottom: -25px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 600;
+  font-size: calc(var(--board-size) / 40);
+}
+.square.light .coords.rank-label { color: rgba(0,0,0,0.65); }
+.square.dark  .coords.rank-label { color: rgba(255,255,255,0.85); }
 
 /* Pieces: single layer with strong contrasting stroke for clarity */
-.piece {
+.piece { 
   line-height: 1;
   font-weight: 250;
   pointer-events: none; /* clicks register on the square */
+  z-index: 6; /* ודאות שהוא מעל הכל, במיוחד מעל הנקודות (5) */
 }
 
 /* White = white fill + black outline */
@@ -242,7 +187,16 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
   color: #000000;
   -webkit-text-stroke: var(--black-stroke-width) #ffffff;
  }
- /* ---------- Append this at the END of your existing styles.css ---------- */
+  /* ---------- Append this at the END of your existing styles.css ---------- */
+
+  /* Clock display: ensure numbers contrast when the clock container is white */
+  .clocks .clock {
+    color: #111; /* dark numbers on light background */
+    font-weight: 700;
+  }
+  .clocks .clock span {
+    color: inherit;
+  }
 
 /* Controls panel (mode, AI, suggest, reset) */
 .status-bar { margin: 0 12px 6px 12px; font-size: 15px; color: #fff; }
@@ -286,8 +240,23 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
 }
 
 /* Last-move highlight: applied to both origin and destination of the most recent move */
-.square.last-move { position: relative; z-index: 2; box-shadow: inset 0 0 0 3px rgba(240,230,120,0.98), 0 6px 18px rgba(0,0,0,0.50); border-radius:2px; }
-.square.last-move::after { content: ''; position: absolute; left: 4px; right: 4px; top: 4px; bottom: 4px; border-radius: 5px; pointer-events: none; box-shadow: 0 0 18px rgba(240,230,120,0.35); }
+.square.last-move {
+  /* Use a subtle filled background for origin/destination of the last move
+     instead of the previous inset border. This makes it visually distinct
+     from available-move dots. */
+  position: relative;
+  z-index: 1; /* יהיה מתחת לתמונת הפורטל (2) */
+  background-color: #cdd26a !important; /* requested color */
+  color: inherit;
+}
+.square.last-move::after { /* subtle outer glow for readability */
+  content: '';
+  position: absolute;
+  left: 2px; right: 2px; top: 2px; bottom: 2px;
+  border-radius: 6px;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(205,210,106,0.25);
+}
 
 /* Ensure portal squares preserve the original board square colors
    (light/dark) in their center while allowing aura/pseudo-elements to
@@ -304,4 +273,54 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0
 .square.portal-neutral.dark {
   background: var(--dark) !important;
   color: inherit !important;
+}
+/*
+  שלב 1: הוסף את "מתכון" האנימציה הזה בסוף קובץ ה-CSS שלך.
+  האנימציה הזו גורמת להילה "לפעום" על ידי שינוי גודל ה-blur והשקיפות.
+*/
+@keyframes pulseHalo {
+  0% {
+    /* התחלה: הילה קטנה ועדינה */
+    box-shadow: 0 0 6px 2px rgba(255, 255, 255, 0.7);
+  }
+  50% {
+    /* אמצע: הילה גדולה ובוהקת */
+    box-shadow: 0 0 14px 6px rgba(255, 255, 255, 1);
+  }
+  100% {
+    /* חזרה להתחלה */
+    box-shadow: 0 0 6px 2px rgba(255, 255, 255, 0.7);
+  }
+}
+
+/*
+  שלב 2: עדכן את הכלל הקיים של הנקודה.
+  אתה יכול פשוט להדביק את הכלל הזה בסוף ה-CSS שלך.
+  הוא יחליף את ההגדרות הישנות של .square.move-target::after.
+*/
+.square.move-target::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: normal; 
+  width: 25%;
+  height: 25%;
+  border-radius: 50%;
+  
+  /* צבע הנקודה הפנימית (שחור שקוף, כמו קודם) */
+  background: rgba(0, 0, 0, 0.4); 
+  
+  pointer-events: none;
+  z-index: 5;
+  
+  /* --- הנה השדרוג --- */
+  
+  /* 1. הוספת ההילה הלבנה עם ה-blur */
+  box-shadow: 0 0 6px 2px rgba(255, 255, 255, 0.7);
+  
+  /* 2. הפעלת האנימציה המהבהבת */
+  /* הפקודה "animation: none;" שהייתה פה - נמחקה */
+  animation: pulseHalo 2s ease-in-out infinite;
 }

@@ -36,6 +36,16 @@
       <input id="aiDepthInput" type="number" min="1" max="4" value="3" style="width:54px" />
     </label>
 
+    <label id="timeControlLabel">
+      Time Control:
+      <select id="timeControlSelect">
+        <option value="5">5 min</option>
+        <option value="10" selected>10 min</option>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+      </select>
+    </label>
+
     <button id="suggestBtn">AI Suggest</button>
     <button id="applySuggestionBtn">Apply Suggestion</button>
     <button id="resetBtn">Reset</button>
@@ -45,6 +55,16 @@
 
   <div class="visually-centered">
     <div id="status" class="status-bar"></div>
+
+    <div id="clocks" class="clocks" style="display:flex;gap:12px;align-items:center;margin:8px 0;">
+      <div id="whiteClock" class="clock" style="padding:6px 10px;border-radius:6px;background:#fff;border:1px solid #ddd;">
+        White: <span id="whiteClockTime">10:00</span>
+      </div>
+      <div id="blackClock" class="clock" style="padding:6px 10px;border-radius:6px;background:#fff;border:1px solid #ddd;">
+        Black: <span id="blackClockTime">10:00</span>
+      </div>
+    </div>
+
     <div id="board" class="board" aria-label="Chessboard"></div>
   </div>
 

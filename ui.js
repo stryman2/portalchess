@@ -23,6 +23,9 @@ const resetBtn = document.getElementById("resetBtn");
 const flipBtn = document.getElementById("flipBtn");
 const aiColorLabel = document.getElementById("aiColorLabel");
 const aiDepthLabel = document.getElementById("aiDepthLabel");
+const timeControlSelect = document.getElementById('timeControlSelect');
+const whiteClockTimeEl = document.getElementById('whiteClockTime');
+const blackClockTimeEl = document.getElementById('blackClockTime');
 
 const FILES = "ABCDEFGH".split("");
 const RANKS = "12345678".split("");
@@ -223,6 +226,51 @@ let onlineColor = null; // 'w' or 'b'
 let isHost = false;
 let onlinePanel = null;
 
+// Server-synced clocks state (ms)
+let serverClocks = null; // { w: ms, b: ms }
+let lastClockSyncAt = 0; // Date.now() when we synced
+let lastServerTs = 0; // server timestamp attached to last update
+let clockRaf = null;
+
+function formatMs(ms) {
+  if (!Number.isFinite(ms) || ms < 0) ms = 0;
+  const totalSec = Math.floor(ms / 1000);
+  const mm = Math.floor(totalSec / 60);
+  const ss = totalSec % 60;
+  return `${mm}:${ss.toString().padStart(2,'0')}`;
+}
+
+function updateClockDisplay() {
+  if (!serverClocks) return;
+  const now = Date.now();
+  const elapsed = Math.max(0, now - lastClockSyncAt);
+  const turn = (state && state.turn) ? state.turn : null;
+  // show interpolated clocks: active player's clock decreases with elapsed
+  let wMs = serverClocks.w;
+  let bMs = serverClocks.b;
+  if (turn === 'w') {
+    wMs = Math.max(0, serverClocks.w - elapsed);
+  } else if (turn === 'b') {
+    bMs = Math.max(0, serverClocks.b - elapsed);
+  }
+  if (whiteClockTimeEl) whiteClockTimeEl.textContent = formatMs(wMs);
+  if (blackClockTimeEl) blackClockTimeEl.textContent = formatMs(bMs);
+}
+
+function startClockLoop() {
+  if (clockRaf) return;
+  function loop() {
+    updateClockDisplay();
+    clockRaf = requestAnimationFrame(loop);
+  }
+  clockRaf = requestAnimationFrame(loop);
+}
+
+function stopClockLoop() {
+  if (clockRaf) cancelAnimationFrame(clockRaf);
+  clockRaf = null;
+}
+
 // AI scheduling timer (so we can cancel pending think work if mode changes)
 let aiTimer = null;
 
@@ -418,7 +466,11 @@ function render() {
         }
       }
 
-      if (selectedSq === s || legalTargets.has(s)) div.classList.add("highlight");
+  // Selected square (origin) gets a visible outline; legal targets get a centered dot.
+  if (selectedSq === s) div.classList.add("selected");
+  // Only show the centered move-dot for empty squares. If the target is
+  // occupied (capture), we intentionally don't show a dot per user's request.
+  if (legalTargets.has(s) && !piece) div.classList.add("move-target");
 
       // last-move overlay: highlight origin and destination of the most recent move
       if (lastMove) {
@@ -433,8 +485,8 @@ function render() {
         if (dest === su) div.classList.add("suggest");
       }
 
-      // Draw piece
-      if (piece) {
+  // Draw piece
+  if (piece) {
         // If the browser is offline (or dev server unreachable), avoid setting
         // img.src which triggers network requests that will fail and spam the
         // console. Instead render the glyph fallback directly. When online we
@@ -472,10 +524,41 @@ function render() {
         }
       }
 
-      const coords = document.createElement("div");
-      coords.className = "coords";
-      coords.textContent = s.toLowerCase();
-      div.appendChild(coords);
+      // Coordinate labels: compute the square's visual position (top->bottom, left->right)
+      // and show file letters on the viewer's bottom row and rank numbers on the
+      // viewer's right-most column. Use boardFlipped to choose the displayed
+      // character so labels read correctly from either perspective.
+      const visualRow = 7 - rIdx; // 0 = top, 7 = bottom (for this rendering branch)
+      const visualCol = fIdx;     // 0 = left, 7 = right
+      const isBottomRow = visualRow === 7;
+      const isRightCol = visualCol === 7;
+      if (isBottomRow) {
+        const c = document.createElement("div");
+        c.className = "coords file-label";
+        const displayFile = boardFlipped ? FILES[7 - visualCol] : FILES[visualCol];
+        c.textContent = displayFile.toLowerCase();
+        div.appendChild(c);
+      } else if (isRightCol) {
+        const c = document.createElement("div");
+        c.className = "coords rank-label";
+        const displayRank = boardFlipped ? RANKS[visualRow] : RANKS[7 - visualRow];
+        c.textContent = displayRank;
+        div.appendChild(c);
+      }
+
+      // If this square is marked as a legal empty target, append a static
+      // move-dot element. We append after pieces/coords so the dot sits above
+      // portal visuals but below coords and pieces (pieces won't exist on
+      // empty-targets by construction).
+      if (div.classList.contains('move-target')) {
+        const dot = document.createElement('span');
+        dot.className = 'move-dot';
+        // create inner background patch and foreground filled circle
+        const bg = document.createElement('span'); bg.className = 'bg';
+        const fg = document.createElement('span'); fg.className = 'fg';
+        dot.appendChild(bg); dot.appendChild(fg);
+        div.appendChild(dot);
+      }
 
         div.addEventListener("click", () => onSquareClick(s));
         boardEl.appendChild(div);
@@ -561,7 +644,9 @@ function render() {
           }
         }
 
-        if (selectedSq === s || legalTargets.has(s)) div.classList.add("highlight");
+  // Selected square (origin) gets a visible outline; legal targets get a centered dot.
+  if (selectedSq === s) div.classList.add("selected");
+  if (legalTargets.has(s) && !piece) div.classList.add("move-target");
 
         if (lastMove) {
           const lu = lastMove.from && lastMove.from.toUpperCase();
@@ -600,10 +685,27 @@ function render() {
           }
         }
 
-        const coords = document.createElement("div");
-        coords.className = "coords";
-        coords.textContent = s.toLowerCase();
-        div.appendChild(coords);
+        // Coordinate labels for the flipped rendering branch.
+        // Compute visual position (0 = top/left, 7 = bottom/right) for consistency
+        // with the non-flipped branch and then render file letters on the
+        // viewer's bottom row and rank numbers on the viewer's right column.
+        const visualRow = rIdx;           // in this flipped loop rIdx increases top->bottom
+        const visualCol = 7 - fIdx;       // f loops 7->0 so transform to 0->7 left->right
+        const isBottomRow = visualRow === 7;
+        const isRightCol = visualCol === 7;
+        if (isBottomRow) {
+          const c = document.createElement("div");
+          c.className = "coords file-label";
+          const displayFile = boardFlipped ? FILES[7 - visualCol] : FILES[visualCol];
+          c.textContent = displayFile.toLowerCase();
+          div.appendChild(c);
+        } else if (isRightCol) {
+          const c = document.createElement("div");
+          c.className = "coords rank-label";
+          const displayRank = boardFlipped ? RANKS[visualRow] : RANKS[7 - visualRow];
+          c.textContent = displayRank;
+          div.appendChild(c);
+        }
 
         div.addEventListener("click", () => onSquareClick(s));
         boardEl.appendChild(div);
@@ -929,6 +1031,7 @@ modeSelect.addEventListener("change", e => {
   }
   // If we switched away from online mode, stop keep-alive pings
   if (mode !== 'online') stopKeepAlive();
+  if (mode !== 'online') stopClockLoop();
   render();
 });
 
@@ -1004,6 +1107,8 @@ resetBtn.addEventListener("click", () => {
   stopKeepAlive();
   // clear game-over flag when manually resetting
   gameOver = false;
+  // stop and clear clocks when resetting
+  stopClockLoop(); serverClocks = null; lastClockSyncAt = 0;
   render();
 });
 
@@ -1115,11 +1220,15 @@ function connectSocket() {
   socket.on('connect', () => { console.log('connected to server', socket.id); });
   // keep-alive will start when the server signals the game has started
 
-  socket.on('gameStart', ({ roomId, color, state: serverState }) => {
+  socket.on('gameStart', ({ roomId, color, state: serverState, clocks }) => {
     onlineRoomId = roomId;
     onlineColor = color;
     // adopt server state and render
     try { state = hydrateState(serverState); } catch (e) { state = serverState; }
+    // if server included clocks (top-level), sync them
+    if (clocks) serverClocks = { w: clocks.w, b: clocks.b };
+    lastClockSyncAt = Date.now(); lastServerTs = Date.now();
+    startClockLoop();
     // reset any previous game-over flag when a new game starts
     gameOver = false;
     showOnlinePanel(`Room: ${roomId} — You are ${color === 'w' ? 'White' : 'Black'}`, window.location.origin + '/play/' + roomId);
@@ -1128,10 +1237,26 @@ function connectSocket() {
     startKeepAlive();
   });
 
-  socket.on('moveMade', ({ resolved, state: serverState }) => {
+  socket.on('moveMade', ({ resolved, state: serverState, clocks }) => {
     try { state = hydrateState(serverState); lastMove = { from: (resolved.from||'').toUpperCase(), to: ((resolved.toFinal||resolved.to)||'').toUpperCase() }; } catch (e) { state = serverState; }
+    // if server included clocks in the payload, sync immediately
+    try { if (clocks) serverClocks = { w: clocks.w, b: clocks.b }; } catch (e) {}
+    lastClockSyncAt = Date.now();
     try { playSoundForResolved(resolved, state); } catch (e) {}
     render();
+  });
+
+  socket.on('clock', (data) => {
+    try {
+      if (!data || !data.clocks) return;
+      serverClocks = { w: data.clocks.w, b: data.clocks.b };
+      lastClockSyncAt = Date.now();
+      lastServerTs = data.ts || lastClockSyncAt;
+      // ensure clock loop is running when in online game
+      if (mode === 'online') startClockLoop();
+      // update instantly
+      updateClockDisplay();
+    } catch (e) { console.warn('clock handler error', e && e.message); }
   });
 
   socket.on('playerLeft', ({ socketId } = {}) => {
@@ -1167,6 +1292,8 @@ function connectSocket() {
       showGameEndModal(msg);
       // Update status bar (always set to a readable string)
       statusEl.textContent = msg || 'Game over.';
+      // stop clock loop when game ends
+      stopClockLoop();
     } catch (e) {
       console.warn('gameEnd handler failed', e && e.message);
     }
@@ -1177,6 +1304,7 @@ function connectSocket() {
   });
 
   socket.on('disconnect', () => { console.log('socket disconnected'); socket = null; onlineRoomId = null; onlineColor = null; hideOnlinePanel(); stopKeepAlive(); });
+  socket.on('disconnect', () => { stopClockLoop(); serverClocks = null; lastClockSyncAt = 0; });
 
   return socket;
 }
@@ -1184,7 +1312,8 @@ function connectSocket() {
 function createRoomOnServer() {
   const s = connectSocket();
   if (!s) return;
-  s.emit('createRoom', (res) => {
+  const timeMinutes = parseInt((timeControlSelect && timeControlSelect.value) || '10', 10) || 10;
+  s.emit('createRoom', { timeMinutes }, (res) => {
     if (res && res.roomId) {
       onlineRoomId = res.roomId; isHost = true; onlineColor = 'w';
       const link = window.location.origin + '/play/' + res.roomId;
