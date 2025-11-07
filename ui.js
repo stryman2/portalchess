@@ -34,6 +34,25 @@ const RANKS = "12345678".split("");
 // with names like 'wP.svg', 'bK.svg', etc.
 const PIECE_IMG_PATH = "/pieces/cburnett";
 
+// Image cache for piece SVGs to avoid DOM re-fetch and flicker.
+const imageCache = {};
+
+function preloadPieceImages() {
+  const types = ['P','N','B','R','Q','K'];
+  const colors = ['w','b'];
+  for (const c of colors) {
+    for (const t of types) {
+      const fileName = `${c}${t}.svg`;
+      const url = `${PIECE_IMG_PATH}/${fileName}`;
+      const img = new Image();
+      img.src = url;
+      // Keep the element (will be cloned when rendering). Mark as loaded when possible.
+      imageCache[fileName] = img;
+      img.addEventListener('error', () => { /* ignore missing images */ });
+    }
+  }
+}
+
 // Inject minimal CSS for portal selection overlay/highlights (kept local so
 // edits don't require changes to styles.css).
 (function injectPortalStyles(){
@@ -289,15 +308,25 @@ function scheduleAiTurn(delay = 40) {
     if (mode !== 'vs-ai') return;
     if (state.turn !== aiColor) return;
     try {
-      const aiMove = getBestMove(state, aiDepth, aiColor);
-      if (aiMove) {
-        state = applyResolvedMove(state, aiMove);
-        try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
-        try { playSoundForResolved(aiMove, state); } catch (e) {}
-        suggestion = null;
-        render();
+      // Run AI computation in an idle window so the browser can paint the
+      // freshly-rendered board before heavy synchronous work blocks the main thread.
+      const runAi = () => {
+        const aiMove = getBestMove(state, aiDepth, aiColor);
+        if (aiMove) {
+          state = applyResolvedMove(state, aiMove);
+          try { lastMove = { from: (aiMove.from || '').toUpperCase(), to: ((aiMove.toFinal || aiMove.to) || '').toUpperCase() }; } catch (e) { lastMove = null; }
+          try { playSoundForResolved(aiMove, state); } catch (e) {}
+          suggestion = null;
+          render();
+        } else {
+          render();
+        }
+      };
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => runAi(), { timeout: 1000 });
       } else {
-        render();
+        // fallback: give the browser a short moment to paint, then run AI
+        setTimeout(runAi, 150);
       }
     } catch (err) {
       console.error('AI error:', err);
@@ -497,30 +526,32 @@ function render() {
           span.textContent = pieceToGlyph(piece);
           div.appendChild(span);
         } else {
-          const img = document.createElement('img');
-          img.className = `piece piece-${piece.color}`;
-          // Example filename: pieces/cburnett/wP.svg
+          // Use preloaded cached image node when available to avoid re-fetch/flicker
           const fileName = `${piece.color}${piece.type}.svg`;
-          img.src = `${PIECE_IMG_PATH}/${fileName}`;
-          img.alt = `${piece.color}${piece.type}`;
-          // Make the image fill the square nicely
-          img.style.width = '100%';
-          img.style.height = '100%';
-          img.style.display = 'block';
-          img.style.pointerEvents = 'none';
-
-          // Fallback: if SVG not available, replace image with glyph span
-          img.addEventListener('error', () => {
-            const span = document.createElement('span');
-            span.className = `piece piece-${piece.color}`;
-            span.textContent = pieceToGlyph(piece);
-            const coordsEl = div.querySelector('.coords');
-            if (coordsEl) div.insertBefore(span, coordsEl);
-            else div.appendChild(span);
-            img.remove();
-          });
-
-          div.appendChild(img);
+          const cached = imageCache[fileName];
+          if (cached && cached.src) {
+            const clone = cached.cloneNode(true);
+            clone.className = `piece piece-${piece.color}`;
+            clone.alt = `${piece.color}${piece.type}`;
+            clone.style.width = '100%'; clone.style.height = '100%'; clone.style.display = 'block'; clone.style.pointerEvents = 'none';
+            div.appendChild(clone);
+          } else {
+            const img = document.createElement('img');
+            img.className = `piece piece-${piece.color}`;
+            img.src = `${PIECE_IMG_PATH}/${fileName}`;
+            img.alt = `${piece.color}${piece.type}`;
+            img.style.width = '100%'; img.style.height = '100%'; img.style.display = 'block'; img.style.pointerEvents = 'none';
+            img.addEventListener('error', () => {
+              const span = document.createElement('span');
+              span.className = `piece piece-${piece.color}`;
+              span.textContent = pieceToGlyph(piece);
+              const coordsEl = div.querySelector('.coords');
+              if (coordsEl) div.insertBefore(span, coordsEl);
+              else div.appendChild(span);
+              img.remove();
+            });
+            div.appendChild(img);
+          }
         }
       }
 
@@ -1168,6 +1199,8 @@ document.addEventListener('keydown', (e) => {
   }).catch(err => {
     console.warn('Audio loader error', err);
   });
+  // Preload piece images to avoid flicker on render
+  try { preloadPieceImages(); } catch (e) { /* ignore */ }
 })();
 
 // Build an online panel inside the controls area for room info
