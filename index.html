@@ -2,42 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Portal Chess (MVP)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Minimal inline favicon to avoid 404 noise during local development -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23333'/></svg>">
+  <title>Portal Chess ⚡</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#667eea" />
+  <meta name="description" content="Modern chess with portal mechanics - A bold new way to play" />
+  <!-- Minimal inline favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23667eea'/></svg>">
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="app-header visually-centered">
-    <h1 class="title">Portal Chess (MVP)</h1>
+    <h1 class="title">⚡ Portal Chess</h1>
 
     <div id="controls" class="controls" aria-hidden="false">
     <label>
       Mode:
       <select id="modeSelect">
-        <option value="hotseat">Hotseat (2 players)</option>
-        <option value="vs-ai">Play vs AI</option>
-        <option value="analyze">Analyze (play both, ask engine)</option>
-        <option value="online">Online (Private Room)</option>
+        <option value="hotseat">🎮 Hotseat</option>
+        <option value="vs-ai">🤖 vs AI</option>
+        <option value="analyze">🔍 Analyze</option>
+        <option value="online">🌐 Online</option>
       </select>
     </label>
 
     <label id="aiColorLabel">
-      AI Color:
+      AI:
       <select id="aiColorSelect">
-        <option value="b">Black (AI)</option>
-        <option value="w">White (AI)</option>
+        <option value="b">⚫ Black</option>
+        <option value="w">⚪ White</option>
       </select>
     </label>
 
     <label id="aiDepthLabel">
-      AI Depth:
+      Depth:
       <input id="aiDepthInput" type="number" min="1" max="4" value="3" style="width:54px" />
     </label>
 
     <label id="timeControlLabel">
-      Time Control:
+      ⏱️:
       <select id="timeControlSelect">
         <option value="5">5 min</option>
         <option value="10" selected>10 min</option>
@@ -46,22 +48,22 @@
       </select>
     </label>
 
-    <button id="suggestBtn">AI Suggest</button>
-    <button id="applySuggestionBtn">Apply Suggestion</button>
-    <button id="resetBtn">Reset</button>
-  <button id="flipBtn">Flip</button>
+    <button id="suggestBtn">💡 Suggest</button>
+    <button id="applySuggestionBtn">✓ Apply</button>
+    <button id="resetBtn">🔄 Reset</button>
+    <button id="flipBtn">↕️ Flip</button>
     </div>
   </div>
 
   <div class="visually-centered">
     <div id="status" class="status-bar"></div>
 
-    <div id="clocks" class="clocks" style="display:flex;gap:12px;align-items:center;margin:8px 0;">
-      <div id="whiteClock" class="clock" style="padding:6px 10px;border-radius:6px;background:#fff;border:1px solid #ddd;">
-        White: <span id="whiteClockTime">10:00</span>
+    <div id="clocks" class="clocks">
+      <div id="whiteClock" class="clock">
+        ⚪ White<span id="whiteClockTime">10:00</span>
       </div>
-      <div id="blackClock" class="clock" style="padding:6px 10px;border-radius:6px;background:#fff;border:1px solid #ddd;">
-        Black: <span id="blackClockTime">10:00</span>
+      <div id="blackClock" class="clock">
+        ⚫ Black<span id="blackClockTime">10:00</span>
       </div>
     </div>
 

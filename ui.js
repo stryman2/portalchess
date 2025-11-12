@@ -6,6 +6,7 @@ import {
   applyResolvedMove,
   isSquareAttacked,
   filterLegalByCheck,
+  gameResult,
   SOUND_FILES,
 } from "./engine.js";
 
@@ -251,6 +252,62 @@ let lastClockSyncAt = 0; // Date.now() when we synced
 let lastServerTs = 0; // server timestamp attached to last update
 let clockRaf = null;
 
+// Local (client-side) clocks for non-online modes
+let localClocks = null; // { w: ms, b: ms }
+let lastLocalTick = 0;
+let localClockInterval = null;
+
+function initLocalClocksFromSelector() {
+  const minutes = parseInt((timeControlSelect && timeControlSelect.value) || '10', 10) || 10;
+  const ms = Math.max(1, minutes) * 60 * 1000;
+  localClocks = { w: ms, b: ms };
+  // Immediately reflect to UI
+  serverClocks = localClocks;
+  lastClockSyncAt = Date.now();
+}
+
+function startLocalClockTick() {
+  if (!localClocks) initLocalClocksFromSelector();
+  if (localClockInterval) return;
+  lastLocalTick = Date.now();
+  // tick every 250ms similar to server
+  localClockInterval = setInterval(() => {
+    try { tickLocalClock(); } catch (e) { console.warn('localClock tick error', e && e.message); }
+  }, 250);
+  // ensure RAF display loop running
+  startClockLoop();
+}
+
+function stopLocalClockTick() {
+  if (localClockInterval) { clearInterval(localClockInterval); localClockInterval = null; }
+  // we keep serverClocks state but stop RAF if online not active
+}
+
+function tickLocalClock() {
+  if (!localClocks) return;
+  if (gameOver) return;
+  const now = Date.now();
+  const delta = now - (lastLocalTick || now);
+  lastLocalTick = now;
+  const turn = state && state.turn ? state.turn : 'w';
+  if (typeof localClocks[turn] !== 'number') return;
+  localClocks[turn] = Math.max(0, localClocks[turn] - delta);
+  // mirror into serverClocks for unified display
+  serverClocks = localClocks;
+  lastClockSyncAt = now;
+  // detect timeout
+  if (localClocks[turn] <= 0) {
+    gameOver = true;
+    stopLocalClockTick();
+    stopClockLoop();
+    clearAiTimer();
+    let winner = turn === 'w' ? 'Black' : 'White';
+    const msg = `${winner} wins on time.`;
+    try { showGameEndModal(msg); } catch (e) {}
+    try { statusEl.textContent = msg; } catch (e) {}
+  }
+}
+
 function formatMs(ms) {
   if (!Number.isFinite(ms) || ms < 0) ms = 0;
   const totalSec = Math.floor(ms / 1000);
@@ -318,6 +375,11 @@ function scheduleAiTurn(delay = 40) {
           try { playSoundForResolved(aiMove, state); } catch (e) {}
           suggestion = null;
           render();
+          // After AI move in local modes, update local clock baseline and check for game end
+          if (mode !== 'online') {
+            try { lastLocalTick = Date.now(); } catch (e) {}
+            try { checkLocalGameEnd(); } catch (e) { console.warn('local game end check failed', e && e.message); }
+          }
         } else {
           render();
         }
@@ -904,9 +966,41 @@ function applyChosenMove(chosen) {
   try { playSoundForResolved(chosen, state); } catch (e) {}
   selectedSq = null; legalTargets.clear(); suggestion = null; render();
 
-  // After human move: schedule AI if needed
+  // After human move: update local clock baseline and check for local game end
+  if (mode !== 'online') {
+    try { lastLocalTick = Date.now(); } catch (e) {}
+    try { checkLocalGameEnd(); } catch (e) { console.warn('local game end check failed', e && e.message); }
+  }
+
   if (mode === "vs-ai" && state.turn === aiColor) {
     scheduleAiTurn(40);
+  }
+}
+
+function checkLocalGameEnd() {
+  // Only run local detection for non-online modes
+  if (mode === 'online') return;
+  try {
+    const res = gameResult(state);
+    if (res && res.result && res.result !== 'ongoing') {
+      gameOver = true;
+      clearAiTimer();
+      stopKeepAlive();
+      stopClockLoop();
+      let msg = '';
+      if (res.result === 'checkmate') {
+        const winner = res.winner === 'w' ? 'White' : (res.winner === 'b' ? 'Black' : res.winner);
+        msg = `Checkmate! ${winner} wins.`;
+      } else if (res.result === 'stalemate') {
+        msg = 'Stalemate! The game is a draw.';
+      } else {
+        msg = 'Game over.';
+      }
+      showGameEndModal(msg);
+      statusEl.textContent = msg || 'Game over.';
+    }
+  } catch (e) {
+    console.warn('checkLocalGameEnd error', e && e.message);
   }
 }
 
@@ -1063,6 +1157,12 @@ modeSelect.addEventListener("change", e => {
   // If we switched away from online mode, stop keep-alive pings
   if (mode !== 'online') stopKeepAlive();
   if (mode !== 'online') stopClockLoop();
+  // Start local clocks for non-online modes
+  if (mode !== 'online') {
+    try { initLocalClocksFromSelector(); startLocalClockTick(); } catch (e) {}
+  } else {
+    try { stopLocalClockTick(); } catch (e) {}
+  }
   render();
 });
 
@@ -1120,6 +1220,11 @@ applySuggestionBtn.addEventListener("click", () => {
     try { playSoundForResolved(suggestion, state); } catch (e) {}
     suggestion = null;
     render();
+    // After applying suggestion in Analyze mode, check for local game end
+    if (mode !== 'online') {
+      try { lastLocalTick = Date.now(); } catch (e) {}
+      try { checkLocalGameEnd(); } catch (e) { console.warn('local game end check failed', e && e.message); }
+    }
   } catch (err) {
     console.error("Error applying suggestion:", err);
     alert("Failed to apply suggestion (see console).");
@@ -1140,6 +1245,12 @@ resetBtn.addEventListener("click", () => {
   gameOver = false;
   // stop and clear clocks when resetting
   stopClockLoop(); serverClocks = null; lastClockSyncAt = 0;
+  // If in a local mode, re-initialize and start local clocks after reset
+  if (mode !== 'online') {
+    try { initLocalClocksFromSelector(); startLocalClockTick(); } catch (e) { /* ignore */ }
+  } else {
+    try { stopLocalClockTick(); } catch (e) {}
+  }
   render();
 });
 

@@ -1,0 +1,37 @@
+Project Brief (Copy for every prompt):
+
+1. Project Name:
+"Portal Chess"
+
+2. Project Description:
+This is an online (multiplayer) chess game based on all standard chess rules, with an added unique mechanic of "portals" on the board.
+
+3. Technology (Main Files):
+
+server.js: A Node.js server (with Express and Socket.io) that manages the game, validates moves, and handles rooms. The server is the single source of truth.
+
+ui.js (or main JS): The "Client" code that runs in the browser. It is responsible for rendering the board, receiving user input, and sending moves to the server.
+
+engine.js: The shared "Rules Engine". This file contains the pure game logic (like calculating legal moves) and is used by both the server and the AI.
+
+style.css (or <style>): The main stylesheet.
+
+4. Core Portal Rules (Critical):
+
+White's Portals (Exclusive): d5, f5, e3, b3. (4-way network).
+
+Black's Portals (Exclusive): c4, e4, d6, g6. (4-way network).
+
+Neutral Portals (For Both Sides): B5 and G4. (A closed 2-way network).
+
+Rule 1 (Activation): A player can use a portal in two ways:
+a. "Move-Jump": Landing on a portal from a regular square allows an immediate jump to another portal in that network.
+b. "Activation-Jump": Starting the turn on a portal square allows using the move to jump to another portal.
+
+Rule 2 (Swap): If jumping to a portal square that is occupied by an opponent's piece, the pieces swap locations (the jumping piece lands on the target square, and the opponent's piece is "thrown" to the square the jump started from).
+
+Rule 3 (Capture on Portal): Capturing an opponent's piece that is on a portal square does not activate the portal. It's a normal capture move.
+
+Rule 4 (Neutral Cooldown): Only for the neutral portals (B5/G4), after a Swap occurs, the player whose piece was forcibly moved cannot use the portal on their very next turn (to prevent loops).
+
+Rule 5 (Personal "No Return"): Only for the personal portals (White/Black), after a piece jumps from Portal A to Portal B, it cannot jump back to Portal A on its next turn (but can jump to other portals in the network).
